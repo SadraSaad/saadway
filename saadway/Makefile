@@ -47,7 +47,7 @@ define Package/saadway
 endef
 
 define Package/saadway/description
-	Resident C daemon (saadwayd) providing multi-profile OpenVPN/IKEv2 client
+	Resident C daemon (`saadway`, procd name saadwayd) providing multi-profile OpenVPN/IKEv2 client
 	tunnel management with atomic nftables policy application, automatic
 	failover with cool-down retry, zero-leak kill switch, forced-tunnel DNS
 	and per-device/domain/IP traffic steering. Ships the standalone
@@ -60,43 +60,28 @@ endef
 
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
-	# T054: daemon sources/headers only — src/unit/ (host test Makefile,
-	# shims, test sources, host ELF binaries) must never enter
-	# PKG_BUILD_DIR (constitution Gate 2 footprint)
-	$(CP) ./src/*.c ./src/*.h $(PKG_BUILD_DIR)/
+	$(CP) ./src/* $(PKG_BUILD_DIR)/
+	# T058 remediation: the host unit-test tree and any stray objects must
+	# never reach the cross-compile tree (Gate 2 footprint; unit/ carries
+	# its own Makefile, dev shims and host ELF test binaries)
+	rm -rf $(PKG_BUILD_DIR)/unit
+	rm -f $(PKG_BUILD_DIR)/*.o
 endef
 
-SAADWAY_MODULES:= main uci-state log ubus policy tunnel-openvpn \
-	tunnel-ikev2 failover steering dns health counters backup
-SAADWAY_OBJECTS:=$(patsubst %,$(PKG_BUILD_DIR)/%.o,$(SAADWAY_MODULES))
-
-# T054: flags / sources / libs strictly separated; only libraries staged by
-# DEPENDS are linked (T049 removed libmbedtls from DEPENDS — the daemon has
-# no mbedtls consumer, so the stale -lmbedtls -lmbedcrypto broke clean-SDK
-# link builds). LDFLAGS come after the object list, libs last. _GNU_SOURCE
-# is intentionally NOT here: every module defines it in-source (a -D flag
-# emits 13 redefinition warnings per build).
-SAADWAY_CFLAGS:=$(TARGET_CFLAGS) -std=c11 -Os -I$(PKG_BUILD_DIR)
-SAADWAY_LIBS:=-lubus -lubox -luci -ljson-c
-
-$(PKG_BUILD_DIR)/%.o: $(PKG_BUILD_DIR)/%.c $(PKG_BUILD_DIR)/saadway.h
-	$(TARGET_CC) $(SAADWAY_CFLAGS) -c -o $@ $<
-
-define Build/Compile
-	$(TARGET_CC) \
-		-o $(PKG_BUILD_DIR)/saadwayd \
-		$(SAADWAY_OBJECTS) \
-		$(TARGET_LDFLAGS) \
-		$(SAADWAY_LIBS)
-endef
+# T058: NO custom Build/Compile — OpenWrt's default runs
+#   $(MAKE) -C $(PKG_BUILD_DIR) CC="$(TARGET_CC)" \
+#       CFLAGS="$(TARGET_CFLAGS)" LDFLAGS="$(TARGET_LDFLAGS)"
+# against src/Makefile, which compiles the 13 daemon modules and links
+# `saadway` with -lubus -lubox -luci -ljson-c -lpthread (json-c kept: the
+# daemon consumes json_object_* symbols; libmbedtls gone since T049).
 
 define Package/saadway/install
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/config $(1)/etc/init.d \
+	$(INSTALL_DIR) $(1)/usr/bin $(1)/etc/config $(1)/etc/init.d \
 		$(1)/etc/saadway/secrets $(1)/etc/saadway/run/openvpn \
 		$(1)/etc/saadway/swanctl \
 		$(1)/usr/share/rpcd/acl.d $(1)/usr/libexec/saadway \
 		$(1)/www/saadway
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/saadwayd $(1)/usr/sbin/saadwayd
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/saadway $(1)/usr/bin/saadway
 	$(INSTALL_DATA) ./files/saadway.conf $(1)/etc/config/saadway
 	$(INSTALL_BIN) ./files/saadway.init $(1)/etc/init.d/saadway
 	$(INSTALL_DATA) ./files/core.nft $(1)/etc/saadway/core.nft

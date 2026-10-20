@@ -205,6 +205,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Polish (Phase 9)**: depends on all desired stories complete
 - **Convergence (Phases 10–11)**: appended after implementation; T047–T053 carry the code/contract fixes derived from the converge audits (T047 dnsmasq-full, T048 LuCI ACL, T049 auth reconciliation incl. `libmbedtls` removal, T050 D2 ratification, T051 i18n, T052 record, T053 session_timeout)
 - **Remediation (Phase 12)**: depends on the Phase 1–11 code state — specifically on T049's `libmbedtls` DEPENDS removal whose stale link-line echo is what T054 repairs; T057 validates the packaged tree once T054–T056 land
+- **Remediation round 2 (Phase 13)**: supersedes the Phase-12 in-package compile approach after the real-SDK link failure persisted; depends on the Phase 1–12 code state; T058 → T059 strictly sequential (same-file/delegation coupling); final validation folds into the T046/T057 on-device round
 
 ### User Story Dependencies
 
@@ -288,3 +289,15 @@ command.
 - [ ] T057 Run `tests/smoke-container.sh` to ensure package integrity (missing) per Gate 3 + quickstart Scenario 5.2 — execute the smoke test after T054–T056 against the rebuilt/cleaned package tree, expect PASS (no unit/ pollution in the package, link succeeds, budget behavior intact); record the outcome in `docs/verify-2512.md` §10 (depends on T054, T055, T056; on-device hardware checks remain in T046) — EXECUTION NOTE (2026-10-20): device-bound, left unexecuted on the build host (script requires nft+ubus+an active tunnel on real OpenWrt; no container runtime available); host-side package-integrity proxies executed instead — Build/Prepare exclusion proof (zero `unit` entries in the staged copy) + all 13 modules object-compiled via the separated `SAADWAY_CFLAGS` (13/13 OK); run the literal script during the T046 device round
 
 **Checkpoint**: a clean-SDK `make package/saadway/{clean,compile}` links and stages without any `src/unit/` residue; the repo carries no build outputs; `tests/smoke-container.sh` passes.
+
+## Phase 13: Remediation Round 2 — Idiomatic Delegation Rebuild (25.12 SDK linker fix)
+
+**Purpose**: The Phase-12 in-package compile still failed on the real SDK
+(`ld.bfd: cannot find …`). Round 2 replaces it with the idiomatic OpenWrt
+pattern: a plain source-tree `src/Makefile` plus the default
+`Build/Compile` delegation.
+
+- [X] T058: Create `saadway/src/Makefile` compiling all 13 daemon sources (`backup.c counters.c dns.c failover.c health.c log.c main.c policy.c steering.c tunnel-ikev2.c tunnel-openvpn.c ubus.c uci-state.c`) into `.o` objects and linking binary `saadway` with `-lubus -lubox -luci -lpthread` (+ `-ljson-c`, required by `ubus.c`/`backup.c` `json_object_*` consumers — prescribed lib list corrected accordingly), with `?=` toolchain vars (`CC`/`CFLAGS`/`LDFLAGS`) so OpenWrt's default `Build/Compile` cross flags always win; refactor `saadway/Makefile`: remove the custom `Build/Compile` define + `SAADWAY_*` vars + pattern rule so OpenWrt defaults to `$(MAKE) -C $(PKG_BUILD_DIR)`, keep `Build/Prepare` copying `./src/*` then explicitly removing the `unit/` directory and stray `*.o` files, and install the built binary as `$(1)/usr/bin/saadway` per T002 + Constitution II (missing)
+- [X] T059: Sync the binary-path change across consumers: `saadway/files/saadway.init` `PROG=/usr/bin/saadway`; `docs/verify-2512.md` §9 install list + §9 link-parity audit (musl `-lpthread` stub note); host-side validation — `make -C saadway/src -n` pipeline + link line, real object compile with overridden `CFLAGS`, `make clean`, shellcheck on the init script — per Gate 3 proxies (partial)
+
+**Checkpoint**: package Makefile carries no `Build/Compile`; a clean-SDK build delegates to `src/Makefile` and stages `/usr/bin/saadway`; path consumers agree.

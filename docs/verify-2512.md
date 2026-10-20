@@ -263,8 +263,9 @@ stub signatures, and this checklist item re-confirms the REAL
 * Zero references to iptables/ipset/fw3 in the whole tree (Gate 1/2) —
   enforced by the T045 audit grep, re-run at release (only negative
   assertions/comments appeared).
-* Package assets actually installed by `saadway/Makefile`: `saadwayd`
-  binary, `files/saadway.conf` → `/etc/config/saadway`, `saadway.init` →
+* Package assets actually installed by `saadway/Makefile`: `saadway`
+  binary (build tree `$(PKG_BUILD_DIR)/saadway` → `/usr/bin/saadway`),
+  `files/saadway.conf` → `/etc/config/saadway`, `saadway.init` →
   `/etc/init.d/`, `core.nft` + `bypass-cidr.txt` → `/etc/saadway/`,
   `rpc-acl.json` → `/usr/share/rpcd/acl.d/saadway.json`,
   `saadway-ovpn-updown` + `saadway-provision` → `/usr/libexec/saadway/`,
@@ -289,15 +290,15 @@ stub signatures, and this checklist item re-confirms the REAL
   objects, and stock rpcd.config grants the root login `list read/write
   '*'`, so this group attaches to LuCI root sessions with zero rpcd config
   changes (§10 record).
-* T055 link/dependency parity audit (Phase 12): `Build/Compile` links
-  `-lubus -lubox -luci -ljson-c` — each with a staging `DEPENDS`
-  counterpart (`+libubus +libubox +libuci +libjson-c`, each exactly
-  once); `-lmbedtls -lmbedcrypto -lcrypt` dropped from the link line
-  (zero daemon consumers after the T049 auth-module deletion —
-  `grep -rn 'crypt(' src/*.c` empty). Flags hoisted to `SAADWAY_CFLAGS`
-  (`$(TARGET_CFLAGS) -std=c11 -Os -I$(PKG_BUILD_DIR)`); `_GNU_SOURCE`
-  intentionally omitted (every module defines it in-source). The host
-  unit suite keeps its dev-only `-lcrypt` link flag (never shipped).
+* Link/dependency parity audit (Phase 12 structure superseded by the
+  Phase 13 delegation restructure): the link line now lives in
+  `src/Makefile` — `-lubus -lubox -luci -ljson-c -lpthread` — each with
+  a staging `DEPENDS` counterpart (`+libubus +libubox +libuci
+  +libjson-c`; pthread rides musl libc — no `+libpthread` package for
+  musl targets, `-lpthread` is a stub there). `-lmbedtls -lmbedcrypto
+  -lcrypt` stay OUT (zero daemon consumers after the T049 auth-module
+  deletion — `grep -rn 'crypt(' src/*.c` empty). The host unit suite
+  keeps its dev-only `-lcrypt` link flag (never shipped).
 
 ---
 
@@ -400,6 +401,24 @@ this phase; each traces to the appended tasks.md lines.
   real 25.12 device, nft+ubus, active tunnel; the build host has no
   container runtime) — its execution folds into the T046 round and must
   PASS there after these packaging fixes.
+* **Phase 13 — idiomatic delegation rebuild (T058–T059).** The Phase-12
+  in-package compile still failed on the real SDK (`ld.bfd: cannot find
+  …`), so packaging now follows the idiomatic OpenWrt pattern: new
+  `saadway/src/Makefile` compiles the 13 modules and links binary
+  `saadway` with `-lubus -lubox -luci -ljson-c -lpthread` (json-c kept
+  vs the requested lib list — `ubus.c`/`backup.c` consume
+  `json_object_*`; omitting it would trade the ld.bfd error for
+  undefined references); the package Makefile has NO custom
+  `Build/Compile` (OpenWrt's default `$(MAKE) -C $(PKG_BUILD_DIR)`
+  carries `TARGET_CC`/`TARGET_CFLAGS`/`TARGET_LDFLAGS`, all honored via
+  `?=` in src/Makefile); `Build/Prepare` copies `./src/*` then removes
+  `unit/` and stray `*.o`; the binary installs as `/usr/bin/saadway`
+  and `saadway.init`'s `PROG` follows. The `saadwayd` identity strings
+  in source (syslog tag, ICMP payload, User-Agent, rendered-file
+  headers) are unchanged. Host validation: `make -n` shows the exact
+  13-object pipeline + link line; a real object compile with an
+  overridden `CFLAGS` proves the cross-flag plumbing; `make clean`
+  works; shellcheck stays clean.
 
 ---
 
