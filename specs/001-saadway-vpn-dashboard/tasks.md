@@ -212,6 +212,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation round 6 (Phase 17)**: depends on the Phase 16 compile surface (T062) — T063 closes the last link gap (the `global_ctx` definition) and adds the reusable host-side link-surface audit that would have caught it; sequential (definition → audit script), SDK link proof folds into the T046/T057 round
 - **Remediation round 7 (Phase 18)**: independent of the C-code phases (the daemon already packages) — T064 converts the LuCI app into a standalone SDK-buildable package and adds the missing LuCI menu entry; sequential (Makefile → menu asset → asset audit), SDK app-build proof folds into the T046/T057 round
 - **Remediation round 8 (Phase 19)**: depends on Phase 18 (T064) — T065 repairs the package METADATA that T064 placed in the wrong evaluation scope (version fields must be top-level so `Package/Default` can derive `VERSION`) and adds the empty build blocks a file-only package needs; the asset set from T064 is unchanged, SDK app-build proof folds into the T046/T057 round
+- **Remediation round 9 (Phase 20)**: depends on the Phase 6 uhttpd wiring (T032) that shipped `saadway/files/uci-defaults/40-saadway-uhttpd` — T066 sanitises the listener address the script writes (CIDR strip + validated bare IPv4 + wildcard-free LAN binding + `commit uhttpd`), T067 adds the host-side audit that reproduces the pre-fix failure, T068 traces the fix into quickstart Scenario 4 and the on-device checklist; T066 → T067 is a fix-then-prove sequence, T067 is file-disjoint from T066 and may be written in parallel (it must fail first), the on-device proof folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -233,6 +234,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - Across stories: US2/US3/US4 task groups are file-disjoint and can proceed in parallel by different developers after Phase 2
 - Story-local [P] tasks as marked (e.g. T012/T013 both tunnel backends concurrently)
 - Phase 12: T056 (worktree/`.gitignore` cleanup) is parallel-safe; T055 review can overlap T056 but NOT T054 (same `saadway/Makefile` file); T057 runs last, after T054–T056
+- Phase 20: T067 (the host-side uci-defaults audit + its pre-fix fixture) is file-disjoint from T066 and can be written in parallel — it must FAIL against the pre-fix script before T066 lands
 
 ---
 
@@ -520,3 +522,83 @@ Stop.` → `ERROR: package/luci-app-saadway failed to build.`
   - Verification per docs/verify-2512.md: (i) a host-side metadata audit that emulates the upstream rules — `Package/Default`'s `VERSION` inheritance, the mandatory-field check and the "no Makefile in the build dir" compile behaviour — applied to BOTH package Makefiles (the check must fail on the pre-fix LuCI Makefile — reproducing the SDK's exact "missing the VERSION field" abort — and on a file-only package whose empty build blocks are missing, distinguishing an UNDEFINED `Build/Compile` (upstream's default would run make in a directory without a Makefile) from a deliberately EMPTY one, and pass after the fix); ship it as `tests/pkg-metadata-audit.sh` next to the existing `tests/link-audit.sh`; (ii) strict greps: `PKG_VERSION`/`PKG_RELEASE` present at the top level, `VERSION` present inside the package define, `Build/Configure` and `Build/Compile` defined as empty blocks; (iii) the authoritative proof — `make package/luci-app-saadway/compile` in the SDK that produced `saadway-1.0.0-r1.apk` — must yield `luci-app-saadway-1.0.0-r1.apk`, folded into the T046/T057 on-device round.
 
 **Checkpoint**: the LuCI package satisfies the build system's metadata contract (top-level version, explicit `VERSION`, empty build blocks); the metadata audit is green for both packages; the SDK produces the app package.
+
+---
+
+## Phase 20: Remediation Round 9 — uhttpd Listener Address Sanitising in the First-Boot Script
+
+**Purpose**: The first-boot script wrote `192.168.5.1/24:80` into
+`uhttpd.main.listen_http`. uhttpd resolves the listener host with
+`getaddrinfo()`, which treats the whole string as a host name — the slash makes
+it unresolvable, uhttpd prints `getaddrinfo(): Name does not resolve` and binds
+**no** socket at all. The standalone dashboard (`/saadway/`) and the `/ubus`
+JSON-RPC transport it depends on are therefore both unreachable, and the LuCI
+"Open Dashboard" link (FR-022) dies with them.
+
+**Root cause (verified against upstream — see the facts below):**
+- `saadway/files/uci-defaults/40-saadway-uhttpd` used the address string
+  exactly as it found it: the UCI fallback (`uci get network.lan.ipaddr`)
+  returns the prefix form `192.168.5.1/24` when the LAN address is configured
+  in CIDR notation, and the script never stripped the mask.
+- The ubus branch is broken in the other direction: netifd reports each
+  address as an OBJECT (`{"address":…,"mask":…}`), so the leaf
+  `@.ipv4-address[0]` makes jsonfilter print the object's JSON text — not an
+  address.
+- The value was never validated, so whatever the two branches returned was
+  written straight into the listener option (through an unquoted heredoc).
+- Two further latent defects sit behind it: `add_list` on top of the stock
+  wildcard list would keep uhttpd listening on EVERY interface (WAN exposure),
+  and the `uci batch` was never committed — so even a correct LAN binding would
+  not survive the next reboot.
+
+**Upstream facts (fetched for this task — upstream is the oracle):**
+- `openwrt/netifd@master` → `ubus.c` → `interface_ip_dump_address_list()`:
+  every address is a table with `"address"` (written with `inet_ntop()`, i.e. a
+  BARE address — never a prefix) plus a separate `"mask"` field → the status
+  JSON is `"ipv4-address": [ { "address": "192.168.5.1", "mask": 24 } ]`.
+- `openwrt/jsonpath@master` (the upstream `jsonfilter` implementation) prints a
+  matched STRING raw and a matched OBJECT as its JSON text → the leaf
+  `@.ipv4-address[0]` yields `{"address":"192.168.5.1","mask":24}`; the address
+  must be selected explicitly: `@["ipv4-address"][0].address`.
+- `openwrt/uhttpd@master` → `listen.c` → `uh_socket_bind()` →
+  `getaddrinfo(host, port, &hints, &addrs)`; on failure it prints
+  `getaddrinfo(): %s` (`gai_strerror()`) and returns 0 → no listener is
+  created — exactly the reported symptom.
+- `openwrt/openwrt@master` → `package/network/services/uhttpd/files/uhttpd.config`:
+  the stock config holds FOUR wildcard entries — `list listen_http 0.0.0.0:80`,
+  `list listen_http [::]:80`, `list listen_https 0.0.0.0:443`,
+  `list listen_https [::]:443`.
+- `openwrt/openwrt@master` → `.../files/uhttpd.init`: `config_get http "$cfg"
+  listen_http` followed by `for listen in $http; do procd_append_param command
+  -p "$listen"; done` → EVERY list entry becomes one `-p <host:port>` argument;
+  `uhttpd_interfaces()` parses the same entries to derive the hotplug IPs
+  (`${listen%%:*}`) — a CIDR string never matches an interface there either.
+- `openwrt/uci@master` → `list.c` → `uci_add_list()`: creates the option when it
+  is missing, APPENDS to an existing list, and CONVERTS a string option into a
+  two-element list; `cli.c` → `uci_batch()` keeps going after a failing command
+  (only 254/255 are special) and `-q` silences the error output.
+- `uci batch` only writes the package delta under `/tmp/.uci` (tmpfs) — without
+  `uci commit uhttpd` the change is lost on the next reboot.
+
+- [ ] T066: Sanitise the uhttpd listener address in the first-boot uci-defaults script (broken) per Constitution IV (Zero-Leak & Atomic Security — fail closed: never write a listener value that can take uhttpd down, never leave a WAN-facing wildcard behind) and FR-020/FR-022 (the dashboard and its `/ubus` transport must be reachable over the LAN), with docs/verify-2512.md §10 (build-time record) — target file: `saadway/files/uci-defaults/40-saadway-uhttpd`:
+  - Strip any CIDR mask from the resolved address before it is used anywhere: `LAN_IP="${LANADDR%%/*}"` → `192.168.5.1/24` becomes `192.168.5.1`. The listener host is resolved with `getaddrinfo()`, which treats the whole string as a host name — a slash makes it unresolvable ("Name does not resolve"), and the same string is fed to the init script's `uhttpd_interfaces()` hotplug matcher.
+  - Fix the ubus leaf: netifd reports `"ipv4-address": [ { "address": "192.168.5.1", "mask": 24 } ]` (objects, not strings), so `jsonfilter -e '@.ipv4-address[0]'` yields the object's JSON text. Use `jsonfilter -e '@["ipv4-address"][0].address'` so a bare address is extracted; KEEP the `uci get network.lan.ipaddr` fallback for the first-boot case where netifd is not up yet — that fallback is the one that produced the observed `192.168.5.1/24`.
+  - Validate BEFORE writing: accept the value only if it is a bare IPv4 literal (exactly four decimal octets, each 0–255, no `/`, no `:`, no whitespace); otherwise leave the stock listener configuration untouched and `exit 0` (fail-safe: the stock `0.0.0.0:80` keeps uhttpd serving, and the firewall's WAN input policy remains the network-layer guard). Never interpolate an unvalidated value into the uci batch — the heredoc is unquoted, so a stray `'` or `$()` in the value would break out of the command.
+  - Write the listeners LAN-bound WITHOUT leaving the wildcards behind: `delete uhttpd.main.listen_http` + `add_list uhttpd.main.listen_http='<LAN_IP>:80'`, and the same pair for `listen_https` → `'<LAN_IP>:443'`. A bare `add_list` is NOT sufficient: the stock config already holds `list listen_http 0.0.0.0:80` and `list listen_http [::]:80` (plus the two https wildcards), and `uci_add_list()` APPENDS to an existing list → uhttpd would keep listening on every interface (WAN exposure — api.md non-goal "No WAN exposure; uhttpd ACL binds to LAN interface only", Constitution IV). `uci_batch()` continues after a failing command, so a `delete` of an absent option is harmless.
+  - Persist the change: add `uci commit uhttpd` after the batch. `uci batch` only writes the delta under `/tmp/.uci` (tmpfs) → without the commit the LAN binding is silently lost on the next reboot and the stock wildcards return.
+  - Keep the rest of the contract unchanged: the "no certificates / no redirect_https / no LuCI paths" rule, the "restart uhttpd only when it is already running and enabled" behaviour, the final `exit 0`, and POSIX-sh/busybox portability (no bashisms, no non-busybox tools).
+  - Repair path for devices that already ran the broken script: the file is installed with `$(CP) ./files/uci-defaults/* $(1)/etc/uci-defaults/` (not a conffile — only `/etc/config/saadway` is), so a package upgrade re-installs the script and `/etc/init.d/boot` re-runs it on the next boot → the stale `192.168.5.1/24:80` value is replaced and uhttpd picks up the committed config on its next start (or is restarted by the script when it is already running and enabled). Record this repair path in docs/verify-2512.md §10.
+  - Verification per docs/verify-2512.md: (i) the host-side audit of T067 is green against the shipped script; (ii) `shellcheck -s sh -S warning` clean; (iii) strict greps: no code path can put a `/` into `listen_http`/`listen_https` — the listener value is assembled only from a validated bare IPv4, and the CIDR strip is present; (iv) the authoritative on-device proof — folded into the T046/T057 round: `uci get uhttpd.main.listen_http` must print `<lan-ip>:80` (no `/`), `uci get uhttpd.main.listen_https` must print `<lan-ip>:443`, `logread | grep -i getaddrinfo` must be empty, the SPA must answer on `http://<lan-ip>/saadway/` and `/ubus` on `https://<lan-ip>/ubus`.
+
+- [ ] T067 [P]: Ship a host-side regression audit for the first-boot uci-defaults script (missing) per Constitution I (Native Platform Compliance — the script must behave like the stock OpenWrt tooling) and Gate 3 (runtime behaviour), with docs/verify-2512.md §10 (build-time record) — target files: `tests/uci-defaults-audit.sh` (new), `tests/fixtures/40-saadway-uhttpd.prefix` (new):
+  - `tests/uci-defaults-audit.sh` — POSIX sh, shellcheck-clean, next to the existing `tests/link-audit.sh` and `tests/pkg-metadata-audit.sh`. It runs `saadway/files/uci-defaults/40-saadway-uhttpd` under a stub `PATH` whose `uci`, `ubus` and `jsonfilter` are tiny recording stubs, then asserts on the recorded uci commands. The script path is an argument, defaulting to the shipped script, so the same audit can be pointed at the pre-fix fixture. Cases: (A) ubus path → a netifd-shaped status JSON → the written listener is `<ipv4>:80` with NO JSON-object text and no `/`; (B) the OBSERVED failure → `uci get network.lan.ipaddr` returns `192.168.5.1/24` → the written listener is `192.168.5.1:80` and NOT `192.168.5.1/24:80`; (C) an unusable value (`not-an-ip`, an empty value, the jsonfilter object text) → the script writes NOTHING (the stock configuration must be left untouched); (D) the recorded commands contain `delete uhttpd.main.listen_http` BEFORE the `add_list` → no `0.0.0.0:80` / `[::]:80` wildcard can survive; (E) the recorded commands contain `commit uhttpd` → the binding survives a reboot; (F) the script exits 0 in EVERY case (it is sourced by `/etc/init.d/boot` in a subshell — a non-zero exit would abort the boot sequence).
+  - The `jsonfilter` stub must mirror the upstream jsonpath semantics it stands in for: a matched STRING is printed raw, a matched OBJECT is printed as its JSON text. That is what makes case (A) meaningful — the pre-fix leaf `@.ipv4-address[0]` therefore yields `{"address":"192.168.5.1","mask":24}` instead of an address.
+  - `tests/fixtures/40-saadway-uhttpd.prefix` — a verbatim snapshot of the PRE-FIX script, kept ONLY as the negative fixture (never installed on a device). Capture it with `git show HEAD:saadway/files/uci-defaults/40-saadway-uhttpd` BEFORE the T066 change is committed (after the commit, HEAD no longer holds the broken version).
+  - Verification per docs/verify-2512.md: (i) `sh tests/uci-defaults-audit.sh` exits 0 against the shipped script; (ii) `sh tests/uci-defaults-audit.sh tests/fixtures/40-saadway-uhttpd.prefix` exits 1 and NAMES the failing case(s) — the proof that the audit has teeth, in the same spirit as the negative cases of `tests/pkg-metadata-audit.sh`; (iii) `shellcheck -s sh -S warning` clean.
+
+- [ ] T068: Trace the uhttpd listener fix into the quickstart and the on-device checklist (missing) per Gate 6 (dual UI + session security) and FR-020/FR-022, with docs/verify-2512.md §9 (asset audit) + §10 (build-time record) — target files: `specs/001-saadway-vpn-dashboard/quickstart.md`, `docs/verify-2512.md`:
+  - `quickstart.md` Scenario 4 (Dual UI + session security) — APPEND one numbered step (the four existing steps and their numbering stay untouched): after the first boot, `uci get uhttpd.main.listen_http` must print `<lan-ip>:80` — a bare `host:port`, never a CIDR — `uci get uhttpd.main.listen_https` must print `<lan-ip>:443`, `logread` must contain no `getaddrinfo(): Name does not resolve`, and the SPA must be served from `http://<lan-ip>/saadway/` on the same origin as `/ubus`.
+  - `docs/verify-2512.md` — §10: record the applied change (the CIDR strip, the `.address` leaf, the delete+add_list rule with the wildcard rationale, the `commit uhttpd` persistence fix and the upgrade repair path) together with the upstream sources it was derived from (netifd `ubus.c` → `interface_ip_dump_address_list`, jsonpath `main.c`, uhttpd `listen.c` → `uh_socket_bind`, openwrt `uhttpd.config` + `uhttpd.init`, uci `list.c` → `uci_add_list` and `cli.c` → `uci_batch`); §9: extend the asset audit with the uci-defaults script — the listener value is assembled only from a validated bare IPv4, so no `/` can reach `listen_http`/`listen_https`.
+  - The authoritative on-device proof (the listener values, the uhttpd log line and the SPA reachability listed in the first bullet) is folded into the T046/T057 on-device round.
+
+**Checkpoint**: the first-boot script can no longer write an unresolvable listener host; the LAN binding is validated, wildcard-free and survives a reboot; the host-side audit proves both the fixed behaviour and the pre-fix failure; the on-device proof is queued with T046/T057.
