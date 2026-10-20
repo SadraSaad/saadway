@@ -321,6 +321,26 @@ suite must be re-run against the **corrected** stub; the authoritative
   `make -C saadway/src -n` pipeline and link line unchanged; no residual
   fictional-API reference outside explanatory comments. The authoritative
   SDK build stays in the T046/T057 on-device round.
+* **OpenWrt libubox/libubus API surface (upstream facts for Phase 16 /
+  T062).** `openwrt/libubox@master` `blobmsg.h`: `UBUS_METHOD` lives in
+  `libubus.h` and takes **three** arguments (`_name, _handler, _policy`);
+  `UBUS_METHOD_NOARG(name, handler)` is the policy-less form (policy =
+  NULL, n_policy = 0) and `UBUS_METHOD(name, handler, NULL)` is NOT a
+  valid substitute (upstream expands `ARRAY_SIZE(_policy)`; `ARRAY_SIZE
+  (NULL)` is ill-formed). libubox ships **no** `blobmsg_add_bool` and
+  **no** `blobmsg_find_name` — a boolean is written with
+  `blobmsg_add_field(buf, BLOBMSG_TYPE_BOOL, …)` over a 1-byte payload
+  (`BLOBMSG_TYPE_BOOL == BLOBMSG_TYPE_INT8`) and a named field is found
+  with `blobmsg_parse()` + a `blobmsg_policy` table, or a
+  `blobmsg_for_each_attr` walk comparing `blobmsg_name()`. libubox's JSON
+  encoder (`blobmsg_json.c`) renders `BLOBMSG_TYPE_BOOL` as
+  `"true"`/`"false"`, so a locally implemented boolean writer keeps the
+  `contracts/api.md` boolean contract exact. The dev-only stub pool
+  masked all of this (fictional 2-argument `UBUS_METHOD` with
+  `UBUS_METHOD_NOARG` aliased to it, plus the two non-existent blobmsg
+  helpers) — same masking class as the `libuci.h` and
+  `struct ubus_deferred_request` incidents; the pool must mirror
+  upstream symbol-for-symbol from now on.
 
 ## 9. Footprint pointers → T045
 

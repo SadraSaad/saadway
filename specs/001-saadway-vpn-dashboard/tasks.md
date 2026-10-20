@@ -208,6 +208,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation round 2 (Phase 13)**: supersedes the Phase-12 in-package compile approach after the real-SDK link failure persisted; depends on the Phase 1–12 code state; T058 → T059 strictly sequential (same-file/delegation coupling); final validation folds into the T046/T057 on-device round
 - **Remediation round 3 (Phase 14)**: depends on the Phase 13 delegation structure (T058) — T060 corrects the header name and the toolchain/staging-include propagation inside it; T060 is the only task, sequential by nature (header fix → staging path → cross-CC default); the authoritative SDK build proof folds into the T046/T057 on-device round
 - **Remediation round 4 (Phase 15)**: depends on the Phase 14 staging/toolchain fix (T060) — T061 aligns the daemon and the dev stub pool with the real upstream libubus deferred-request API and re-verifies the ubus status-code mapping; strictly sequential (stub API → daemon call sites → status mapping), and the SDK build proof again folds into the T046/T057 round
+- **Remediation round 5 (Phase 16)**: depends on the Phase 15 libubus alignment (T061) — T062 aligns the remaining libubus/libubox API surface (`UBUS_METHOD` arity, the two non-existent blobmsg helpers) in `ubus.c`, adds the local helpers to `saadway.h`, and purges the fictional declarations from the dev stub pool; sequential (helpers → method table → call sites → stub), SDK build proof folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -371,3 +372,42 @@ for this task — the headers 25.12 ships):**
   - Verification per docs/verify-2512.md §8: (i) `gcc -fsyntax-only` over all 13 modules against the **corrected** stub; (ii) unit suite `make check` still 21/21 (the stub change must not alter behaviour expectations); (iii) `make -C saadway/src -n` pipeline unchanged; (iv) the authoritative `make package/saadway/{clean,compile}` on the 25.12 SDK — the real proof — folded into the T046/T057 on-device round.
 
 **Checkpoint**: the daemon compiles against the real OpenWrt 25.12 libubus API; no fictional libubus type remains in code or stubs; the SPA's denial-code mapping is upstream-accurate.
+
+## Phase 16: Remediation Round 5 — libubox / libubus API Surface Alignment in ubus.c
+
+**Purpose**: Resolve the SDK compile failures in `saadway/src/ubus.c`:
+`macro "UBUS_METHOD" requires 3 arguments, but only 2 given`,
+`implicit declaration of function 'blobmsg_find_name'`, and
+`implicit declaration of function 'blobmsg_add_bool'`.
+
+**Upstream facts (openwrt/libubox@master `blobmsg.h` + `blobmsg_json.c`,
+openwrt/ubus@master `libubus.h` — fetched for this task):**
+- `UBUS_METHOD(_name, _handler, _policy)` takes **three** arguments;
+  `UBUS_METHOD_NOARG(_name, _handler)` is the policy-less form (it sets
+  `policy = NULL`, `n_policy = 0`). `UBUS_METHOD(name, handler, NULL)` is
+  **not** a valid substitute — upstream expands `ARRAY_SIZE(_policy)` and
+  `ARRAY_SIZE(NULL)` is ill-formed, so every 2-argument use must become
+  `UBUS_METHOD_NOARG` (or a real policy table).
+- libubox ships **no** `blobmsg_add_bool` and **no** `blobmsg_find_name`:
+  the boolean writer is `blobmsg_add_field(buf, BLOBMSG_TYPE_BOOL, …)`
+  with a 1-byte payload (`BLOBMSG_TYPE_BOOL == BLOBMSG_TYPE_INT8`), and
+  the named lookup is `blobmsg_parse()` with a `blobmsg_policy` table or a
+  `blobmsg_for_each_attr` walk comparing `blobmsg_name()`.
+- libubox's JSON encoder (`blobmsg_json.c`) renders `BLOBMSG_TYPE_BOOL`
+  as `"true"`/`"false"` — a locally implemented boolean writer therefore
+  keeps `contracts/api.md`'s boolean contract exact.
+- The DEV-ONLY stub pool masked all three defects: its `libubus.h`
+  declared a fictional 2-argument `UBUS_METHOD` (with
+  `UBUS_METHOD_NOARG` aliased to it) and its `libubox/blobmsg.h` declared
+  the two non-existent blobmsg helpers — the same masking class as the
+  `libuci.h` (Phase 14) and `struct ubus_deferred_request` (Phase 15)
+  incidents.
+
+- [ ] T062: Implement missing blobmsg helpers and fix UBUS_METHOD signatures in ubus.c (missing) per Constitution I (Native Platform Compliance — the daemon MUST use the standard OpenWrt 25.12 libubus/libubox APIs), Gate 1 (platform) / Gate 2 (footprint — no new dependency) and docs/verify-2512.md §8 + §10 (build-time record) — target files: `saadway/src/ubus.c`, `saadway/src/saadway.h`:
+  - `saadway/src/ubus.c` — replace the **16** two-argument `UBUS_METHOD(name, handler)` entries with the upstream policy-less form `UBUS_METHOD_NOARG(name, handler)` (the 8 existing `UBUS_METHOD_NOARG` entries stay unchanged). Where a method DOES take arguments, prefer the upstream-idiomatic `UBUS_METHOD(name, handler, policy)` with a `static const struct blobmsg_policy` table whose entries mirror the parameters documented in `contracts/api.md` (e.g. `mgmt.set` → `enabled` `BLOBMSG_TYPE_BOOL`; `profile.import_openvpn` → `name`/`ovpn_b64` STRING + optional `credentials` TABLE; `steer.domain.add` → `domain` STRING; `maint.backup.import` → `json_b64`/`schema_version`; `mon.logs` → optional `cursor`/`lines`) so ubus performs upstream-standard type validation before the handler runs; the handlers keep their manual parsing and must treat a policy-rejected message as `UBUS_STATUS_INVALID_ARGUMENT`.
+  - `saadway/src/saadway.h` — provide the two helpers libubox does not ship, as local `static inline` helpers (not upstream symbols): `blobmsg_add_bool(buf, name, val)` via `blobmsg_add_field(buf, BLOBMSG_TYPE_BOOL, name, &b, 1)` with a 1-byte payload (upstream's JSON encoder emits `true`/`false` for this type, so the api.md boolean contract holds), and a named-field lookup `blobmsg_find_name(msg, name)` implemented as a `blobmsg_for_each_attr` walk comparing `blobmsg_name()`, with an **optional expected-type argument** so a policy-less method cannot be fed a wrong-typed field (type-confusion guard — e.g. `mgmt.set` must not read a BOOL out of a STRING attribute).
+  - `saadway/src/ubus.c` — route every call site of the two helpers through the local implementations and type-check the values read afterwards (`blobmsg_get_bool` / `blobmsg_get_u32` only after the type check); record in the file that `arg_missing()` (ubus.c:101) is a no-op today and that with real policy tables ubus performs the argument validation.
+  - DEV-ONLY stub pool (`/tmp/opencode/swstubs/libubus.h` + `libubox/blobmsg.h`, never shipped) — drop the fictional declarations so the pool mirrors upstream exactly: replace the 2-argument `UBUS_METHOD` and its `UBUS_METHOD_NOARG` alias with upstream's 3-argument `UBUS_METHOD` plus the real `UBUS_METHOD_NOARG` (policy = NULL), and remove the non-existent `blobmsg_add_bool` / `blobmsg_find_name` declarations (they are now local helpers in `saadway.h`); the pool must never again declare a symbol upstream does not provide.
+  - Verification per docs/verify-2512.md: (i) `gcc -fsyntax-only` over all 13 modules against the **corrected** stub; (ii) unit suite `make check` still 21/21; (iii) `make -C saadway/src -n` pipeline and link line unchanged; (iv) the authoritative `make package/saadway/{clean,compile}` on the 25.12 SDK — the real proof — folded into the T046/T057 on-device round, where `mgmt.status` must still report `enabled`/`running` as JSON booleans and all 24 `saadway.*` method names must still match `contracts/api.md`.
+
+**Checkpoint**: the daemon compiles against the real OpenWrt 25.12 libubus/libubox API surface; no fictional libubus/libubox symbol remains in code or stubs; the RPC surface and its JSON types are unchanged from `contracts/api.md`.
