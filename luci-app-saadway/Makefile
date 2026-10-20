@@ -33,6 +33,20 @@
 # feed, and the app is inert on a device without LuCI anyway — pull
 # luci-base from an image package list when building a full image.
 
+# T065: the version metadata MUST be declared at the TOP LEVEL, before
+# include $(INCLUDE_DIR)/package.mk — upstream's BuildPackage evaluates
+# $(Package/Default) BEFORE $(Package/luci-app-saadway), and Package/Default
+# is what derives the package-scoped VERSION field from PKG_VERSION /
+# PKG_RELEASE. Declaring them inside the package define is too late: the
+# derivation already ran with an empty PKG_VERSION, VERSION stayed empty
+# and the build aborted with
+#   "Package/luci-app-saadway is missing the VERSION field".
+# The core package declares these the same way (saadway/Makefile) and is
+# why it packages as saadway-1.0.0-r1.apk.
+PKG_NAME:=luci-app-saadway
+PKG_VERSION:=1.0.0
+PKG_RELEASE:=1
+
 include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/package.mk
 
@@ -40,12 +54,21 @@ define Package/luci-app-saadway
 	SECTION:=luci
 	CATEGORY:=LuCI
 	TITLE:=SaadWay service status/enable and dashboard link
+	VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)
 	DEPENDS:=+saadway
 	PKGARCH:=all
-	PKG_VERSION:=1.0.0
-	PKG_RELEASE:=1
 	MAINTAINER:=SaadWay Maintainers <saadway@invalid.example>
 	PKG_LICENSE:=Apache-2.0
+endef
+
+# T065: this package ships FILES only — no compiled sources. The default
+# Build/Compile would run $(MAKE) -C $(PKG_BUILD_DIR) where no Makefile
+# exists, and the default Build/Configure would look for a ./configure
+# script that does not exist. Both are therefore explicitly empty.
+define Build/Configure
+endef
+
+define Build/Compile
 endef
 
 define Package/luci-app-saadway/install

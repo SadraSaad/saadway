@@ -475,6 +475,32 @@ suite must be re-run against the **corrected** stub; the authoritative
   `Build/Compile` runs `$(MAKE) -C $(PKG_BUILD_DIR)` where no Makefile
   exists, and the default `Build/Configure` looks for a `./configure`
   script that does not exist.
+* **Phase 19 / T065 applied.** `luci-app-saadway/Makefile` now declares
+  the version metadata at the TOP LEVEL (`PKG_NAME:=luci-app-saadway`,
+  `PKG_VERSION:=1.0.0`, `PKG_RELEASE:=1`, before
+  `include $(INCLUDE_DIR)/package.mk`) and the package-scoped field
+  explicitly (`VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)`), and defines
+  `Build/Configure` and `Build/Compile` as EMPTY blocks — a file-only
+  package needs them, because upstream's default `Build/Compile` runs
+  `$(MAKE) -C $(PKG_BUILD_DIR)` where no Makefile exists. The core
+  package needed no change: it already declares its version at the top
+  level (`saadway/Makefile:17-19`), which is why it packages as
+  `saadway-1.0.0-r1.apk`.
+  New `tests/pkg-metadata-audit.sh` (POSIX sh, shellcheck-clean)
+  emulates the upstream contract on the build host: a stub
+  `rules.mk`/`package.mk` replicating `Package/Default`'s VERSION
+  derivation, upstream's evaluation order (`$(Package/Default)` BEFORE
+  `$(Package/<name>)`) and the mandatory-field check, applied to BOTH
+  package Makefiles. Two subtleties the emulation had to get right:
+  upstream escapes the check as `$$(error …)` — an unescaped `$(error …)`
+  inside a `$(foreach …)` body is expanded with the body TEXT and fires
+  unconditionally, which produced a false failure; and the audit
+  distinguishes an UNDEFINED `Build/Compile` (upstream's default applies)
+  from a deliberately EMPTY one via `$(origin …)`. Both negative cases
+  are proven: the pre-fix LuCI Makefile reproduces the SDK's exact
+  "Package/luci-app-saadway is missing the VERSION field" abort, and a
+  file-only package without the empty build blocks is reported as
+  `Build/Compile is 'undefined' (must be an empty block)`.
 
 ## 9. Footprint pointers → T045
 
