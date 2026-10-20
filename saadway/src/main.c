@@ -39,6 +39,19 @@
 static struct blob_buf bb;
 
 /* ------------------------------------------------------------------ */
+/* the daemon's single context (T063)                                  */
+/*                                                                      */
+/* saadway.h declares `extern struct sw_ctx *global_ctx;` — this file  */
+/* owns the ONE definition of that symbol; the runtime modules         */
+/* (ubus.c, dns.c) only dereference it. The context itself stays heap- */
+/* allocated (main() owns the lifetime and assigns the pointer), so the */
+/* global is the pointer, not the struct. A second definition anywhere */
+/* in the daemon would be a duplicate-symbol link error.               */
+/* ------------------------------------------------------------------ */
+
+struct sw_ctx *global_ctx = NULL;
+
+/* ------------------------------------------------------------------ */
 /* child registry (tunnel children, dnsmasq instance; reaper honors)    */
 /* ------------------------------------------------------------------ */
 

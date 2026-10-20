@@ -478,6 +478,10 @@ void sw_child_track(pid_t pid, int type, void *arg);
 bool sw_child_take(pid_t pid, int *type, void **arg);
 pid_t sw_child_find(int type, void *arg); /* first live child of type owning arg */
 void sw_child_quit_tunnel(void *arg);   /* requested stop of tunnel child */
+/* The daemon's single context. T063: this is a DECLARATION only — the one
+ * definition lives in main.c (the owner of the context lifetime; the
+ * struct stays heap-allocated and main() assigns this pointer). Do not
+ * add a second definition in another daemon translation unit. */
 extern struct sw_ctx *global_ctx;
 extern volatile sig_atomic_t g_child_exited;
 

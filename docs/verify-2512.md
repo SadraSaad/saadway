@@ -390,6 +390,27 @@ suite must be re-run against the **corrected** stub; the authoritative
   That audit is the reusable check the Phase-17 task turns into
   `tests/link-audit.sh`; it detects missing definitions long before an
   SDK build reaches the link step.
+* **Phase 17 / T063 applied.** `saadway/src/main.c` now owns the single
+  definition of the daemon context — a file-scope, non-static
+  `struct sw_ctx *global_ctx = NULL;` — while the context itself stays
+  heap-allocated and `main()` keeps assigning the pointer
+  (`global_ctx = c;`) right after the `calloc()`, i.e. before logging,
+  UCI load, signal handlers and the uloop loop are set up. `saadway.h`
+  keeps the `extern` declaration (ubus.c/dns.c dereference it) and now
+  documents that the one definition lives in `main.c`; the unit harness
+  keeps its own definition in `src/unit/test-stubs.c` only because its
+  SRC list excludes `main.c` (adding `main.c` there would create a
+  duplicate symbol — recorded as an invariant in the task).
+  New `tests/link-audit.sh` (host-side, shellcheck-clean): compiles the
+  13 modules against the dev stubs and fails when a daemon-internal
+  symbol (`sw_*` / `h_*` / `global_ctx` / …) is referenced but undefined
+  by the module set, classifying the target-library families
+  (`blob*`, `blobmsg*`, `ubus*`, `uci*`, `json_*`, `uloop*`) and the C
+  library as external. Its negative self-test (the definition removed
+  from a scratch copy) reproduces the original failure by naming
+  `global_ctx`, so the check demonstrably has teeth. Host evidence:
+  link-audit OK; 13/13 modules compile under `-Wall -Wextra`; unit suite
+  21/21. The authoritative SDK link stays in the T046/T057 round.
 
 ## 9. Footprint pointers → T045
 
