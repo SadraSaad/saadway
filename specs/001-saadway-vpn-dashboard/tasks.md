@@ -207,6 +207,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation (Phase 12)**: depends on the Phase 1–11 code state — specifically on T049's `libmbedtls` DEPENDS removal whose stale link-line echo is what T054 repairs; T057 validates the packaged tree once T054–T056 land
 - **Remediation round 2 (Phase 13)**: supersedes the Phase-12 in-package compile approach after the real-SDK link failure persisted; depends on the Phase 1–12 code state; T058 → T059 strictly sequential (same-file/delegation coupling); final validation folds into the T046/T057 on-device round
 - **Remediation round 3 (Phase 14)**: depends on the Phase 13 delegation structure (T058) — T060 corrects the header name and the toolchain/staging-include propagation inside it; T060 is the only task, sequential by nature (header fix → staging path → cross-CC default); the authoritative SDK build proof folds into the T046/T057 on-device round
+- **Remediation round 4 (Phase 15)**: depends on the Phase 14 staging/toolchain fix (T060) — T061 aligns the daemon and the dev stub pool with the real upstream libubus deferred-request API and re-verifies the ubus status-code mapping; strictly sequential (stub API → daemon call sites → status mapping), and the SDK build proof again folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -330,3 +331,43 @@ failure `saadway.h:31:10: fatal error: libuci.h: No such file or directory`.
   - Verification per docs/verify-2512.md: (i) `gcc -fsyntax-only` over all 13 modules against the dev stub headers; (ii) `make -C saadway/src -n` shows the cross compiler plus `-I$(STAGING_DIR)/usr/include` on the compile line; (iii) unit suite `make check` still 21/21; (iv) authoritative proof — a real SDK `make package/saadway/{clean,compile}` on `ipq40xx/chromium`, recorded in docs/verify-2512.md §10 together with the upstream facts cited above and folded into the T046 on-device round.
 
 **Checkpoint**: the 25.12 SDK build compiles and links `saadway` with no header-resolution error; no new runtime dependency; host unit suite unchanged.
+
+## Phase 15: Remediation Round 4 — libubus Deferred-Request API Alignment
+
+**Purpose**: Resolve the SDK compile failures caused by a wrong libubus
+deferred-request API in the daemon:
+`invalid use of undefined type 'struct ubus_deferred_request'`,
+`void value not ignored as it ought to be`, and
+`passing argument from incompatible pointer type`.
+
+**Upstream facts (openwrt/ubus@master `libubus.h` + `ubusmsg.h`, fetched
+for this task — the headers 25.12 ships):**
+- `ubus_defer_request()` is a **`static inline void`** taking
+  `(struct ubus_context *, struct ubus_request_data *req, struct
+  ubus_request_data *new_req)`; it copies the request data and sets
+  `req->deferred = true` — **no return value, no error signal**;
+- `ubus_complete_deferred_request(struct ubus_context *, struct
+  ubus_request_data *req, int ret)` — the handle is a **plain
+  `struct ubus_request_data` value**;
+- **`struct ubus_deferred_request` does not exist upstream**, and
+  `struct ubus_request_data` has **no `hdr` member** (`&dreq->hdr` is
+  invalid);
+- `ubus_send_reply(struct ubus_context *, struct ubus_request_data *,
+  struct blob_attr *)` returns `int`;
+- status enum (`ubusmsg.h`, 0-based): `PERMISSION_DENIED=6`, `TIMEOUT=7`,
+  `UNKNOWN_ERROR=9` — the "9 = PERMISSION_DENIED" claim in
+  `htdocs/…/api.js` and in `docs/verify-2512.md` §5/§6 is wrong against
+  the upstream enum.
+- The host suite missed all of this because the DEV-ONLY stub pool
+  declared the fictional API (same masking class as the `libuci.h`
+  incident closed in Phase 14) — the stub must mirror upstream exactly.
+
+- [ ] T061: Correct libubus deferred request types and call signatures (missing) per Constitution I (Native Platform Compliance — the daemon MUST use the standard OpenWrt 25.12 libubus API), Gate 1 (platform) / Gate 2 (footprint — no new dependency), and docs/verify-2512.md §8 (corrected upstream record) / §5–§6 (status-code mapping) / §10 (build-time record) — target files: `saadway/src/saadway.h`, `saadway/src/main.c`, plus `saadway/src/ubus.c` (same defect in the `mon.health_test` path — outside the original brief but in scope):
+  - `saadway/src/saadway.h` — replace `struct ubus_deferred_request *dreq;` with a **value** handle `struct ubus_request_data dreq;` plus a `bool dreq_active;` flag (the upstream deferral is void, so the "deferral in flight" state needs an explicit flag); remove every reference to the non-existent `struct ubus_deferred_request` type.
+  - `saadway/src/main.c` — fix the four deferred-reply sites (defer at ~L234; complete at ~L151, ~L195, ~L260): call `ubus_defer_request(c->ubus, req, &c->act.dreq);` **without** a return-value comparison and set the active flag; reply with `ubus_send_reply(c->ubus, &c->act.dreq, bb.head)` (**no `->hdr`** — `ubus_request_data` has no such member); complete with `ubus_complete_deferred_request(c->ubus, &c->act.dreq, UBUS_STATUS_*)`; replace the `free(dreq); dreq = NULL;` pairs with clearing the active flag (the handle is a value — nothing to free).
+  - `saadway/src/ubus.c` — same correction for the health-test path: the `g_htest` handle becomes `struct ubus_request_data dreq;` + `bool dreq_active;` (currently `struct ubus_deferred_request *dreq;` at ~L31) and the sites at ~L919, ~L921, ~L923–924 and ~L944–945 are rewritten to the upstream call shape (void defer + flag, `&g_htest.dreq`, no `->hdr`, no `free`).
+  - DEV-ONLY stub pool (`/tmp/opencode/swstubs/libubus.h`, never shipped) — mirror the upstream header exactly: `static inline void ubus_defer_request(ctx, req, new_req)` (memcpy + `req->deferred = true`), `void ubus_complete_deferred_request(ctx, struct ubus_request_data *req, int ret)`, `int ubus_send_reply(ctx, struct ubus_request_data *req, struct blob_attr *msg)`, and **delete the fictional `struct ubus_deferred_request`**; the pool must never again declare a type upstream does not have (same rule that fixed `libuci.h`).
+  - Status-code mapping — re-verify the denied-login code against rpcd's `session.login` return path and the upstream enum, then correct `htdocs/…/api.js` (the "9 = PERMISSION_DENIED" comment and the `isDenied` set) and `docs/verify-2512.md` §5/§6; the SPA's denial set MUST be a defensive superset that includes the true permission-denied code (6) and keep the transport code 7 OUT of the re-login trigger set.
+  - Verification per docs/verify-2512.md §8: (i) `gcc -fsyntax-only` over all 13 modules against the **corrected** stub; (ii) unit suite `make check` still 21/21 (the stub change must not alter behaviour expectations); (iii) `make -C saadway/src -n` pipeline unchanged; (iv) the authoritative `make package/saadway/{clean,compile}` on the 25.12 SDK — the real proof — folded into the T046/T057 on-device round.
+
+**Checkpoint**: the daemon compiles against the real OpenWrt 25.12 libubus API; no fictional libubus type remains in code or stubs; the SPA's denial-code mapping is upstream-accurate.

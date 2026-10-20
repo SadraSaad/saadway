@@ -242,20 +242,55 @@ the timeout semantics with blocked targets (`tests/smoke-container.sh`).
 
 ## 8. libubus deferred-reply signature (build-time check)
 
-`mon.health_test` completes asynchronously (SC-003) via:
+`mon.health_test` and `profile.activate` complete asynchronously (SC-003 /
+SC-001) via the **real upstream API** — fetched from `openwrt/ubus@master`
+`libubus.h` (the header OpenWrt 25.12 ships):
 
 ```c
-int  ubus_defer_request(struct ubus_context *ctx,
-                        struct ubus_request_data *req,
-                        struct ubus_deferred_request **out);  /* **out ! */
+/* send a reply to an incoming object method call */
+int ubus_send_reply(struct ubus_context *ctx, struct ubus_request_data *req,
+		    struct blob_attr *msg);
+
+/* static inline void — copies the request data and marks the original
+ * as deferred; there is NO return value and NO error signal */
+static inline void ubus_defer_request(struct ubus_context *ctx,
+				      struct ubus_request_data *req,
+				      struct ubus_request_data *new_req)
+{
+    (void) ctx;
+    memcpy(new_req, req, sizeof(*req));
+    req->deferred = true;
+}
+
 void ubus_complete_deferred_request(struct ubus_context *ctx,
-                        struct ubus_deferred_request *h, int ret);
+				    struct ubus_request_data *req, int ret);
 ```
 
-The two-level `**out` is a known historic source of merge confusion; the
-host syntax-check (all 13 modules, `gcc -fsyntax-only`) passes against the
-stub signatures, and this checklist item re-confirms the REAL
-`<libubus.h>` signature match during the on-device/rebuild compile
+**Corrections to the earlier record in this file** (the `**out` form
+previously written here does NOT exist upstream — `struct
+ubus_deferred_request` is not a libubus type at all):
+
+* the deferred handle is a **plain `struct ubus_request_data` value**, not an
+  opaque pointer — `ubus_request_data` has no `hdr` member, so
+  `&dreq->hdr` is invalid (it must be `&dreq`);
+* `ubus_defer_request()` returns **void** — it cannot be compared against 0;
+  error handling must use a separate "deferral active" flag;
+* the dev-only stub pool must mirror this API exactly (it previously declared
+  the fictional `struct ubus_deferred_request`, which masked the mismatch
+  from the host suite — the same masking class as the `libuci.h` incident
+  fixed in Phase 14);
+* upstream status codes (`ubusmsg.h` enum, 0-based):
+  `UBUS_STATUS_OK=0`, `INVALID_COMMAND=1`, `INVALID_ARGUMENT=2`,
+  `METHOD_NOT_FOUND=3`, `NOT_FOUND=4`, `NO_DATA=5`,
+  **`PERMISSION_DENIED=6`**, **`TIMEOUT=7`**, `NOT_SUPPORTED=8`,
+  **`UNKNOWN_ERROR=9`**, `CONNECTION_FAILED=10` — the earlier claim in this
+  file (§5/§6) and in `htdocs/…/api.js` that "9 = PERMISSION_DENIED" is
+  wrong against the upstream enum and must be re-verified against rpcd's
+  `session.login` return path (Phase 15 / T061).
+
+The host syntax-check (all 13 modules, `gcc -fsyntax-only`) and the unit
+suite must be re-run against the **corrected** stub; the authoritative
+`<libubus.h>` match is confirmed by the on-device/rebuild compile
 (T046 pre-step `make` on the router SDK or package build).
 
 ## 9. Footprint pointers → T045
