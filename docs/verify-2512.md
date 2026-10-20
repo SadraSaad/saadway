@@ -411,6 +411,24 @@ suite must be re-run against the **corrected** stub; the authoritative
   `global_ctx`, so the check demonstrably has teeth. Host evidence:
   link-audit OK; 13/13 modules compile under `-Wall -Wextra`; unit suite
   21/21. The authoritative SDK link stays in the T046/T057 round.
+* **LuCI app packaging in an SDK-only tree (facts for Phase 18 /
+  T064).** `luci-app-saadway/Makefile` currently ends with
+  `include $(TOPDIR)/feeds/luci/luci.mk` — that path exists only in a
+  full OpenWrt source tree with the luci feed checked out. In an SDK
+  drop-in (`<sdk>/package/luci-app-saadway/`) the include resolves to
+  nothing, `BuildPackage` is never evaluated, the metadata scanner does
+  not register the package, and the build fails with "No rule to make
+  target 'package/luci-app-saadway/compile'". The fix is a standalone
+  `include $(INCLUDE_DIR)/package.mk` definition with an explicit
+  `Package/luci-app-saadway` block; note that `PKG_VERSION` and
+  `PKG_RELEASE` are MANDATORY there (the build system errors with
+  "missing the VERSION field" — the luci.mk flow used to supply them
+  implicitly). The package also ships no LuCI menu entry
+  (`/usr/share/luci/menu.d/*.json`), and LuCI2's client router builds
+  its route tree from exactly those files — so the documented
+  "Administration → SaadWay" entry (FR-022, quickstart Scenario 4) could
+  not appear; the standalone rewrite adds it in the same `root/` tree,
+  gated by the same ACL group the app already installs.
 
 ## 9. Footprint pointers → T045
 

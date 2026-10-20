@@ -210,6 +210,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation round 4 (Phase 15)**: depends on the Phase 14 staging/toolchain fix (T060) — T061 aligns the daemon and the dev stub pool with the real upstream libubus deferred-request API and re-verifies the ubus status-code mapping; strictly sequential (stub API → daemon call sites → status mapping), and the SDK build proof again folds into the T046/T057 round
 - **Remediation round 5 (Phase 16)**: depends on the Phase 15 libubus alignment (T061) — T062 aligns the remaining libubus/libubox API surface (`UBUS_METHOD` arity, the two non-existent blobmsg helpers) in `ubus.c`, adds the local helpers to `saadway.h`, and purges the fictional declarations from the dev stub pool; sequential (helpers → method table → call sites → stub), SDK build proof folds into the T046/T057 round
 - **Remediation round 6 (Phase 17)**: depends on the Phase 16 compile surface (T062) — T063 closes the last link gap (the `global_ctx` definition) and adds the reusable host-side link-surface audit that would have caught it; sequential (definition → audit script), SDK link proof folds into the T046/T057 round
+- **Remediation round 7 (Phase 18)**: independent of the C-code phases (the daemon already packages) — T064 converts the LuCI app into a standalone SDK-buildable package and adds the missing LuCI menu entry; sequential (Makefile → menu asset → asset audit), SDK app-build proof folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -443,3 +444,39 @@ compiled, but the link could not resolve the daemon's context symbol.
   - Verification per docs/verify-2512.md: (i) `tests/link-audit.sh` green — no unresolved daemon-internal symbol; (ii) `gcc -fsyntax-only` over all 13 modules; (iii) unit suite `make check` still 21/21 (the stub's own definition stays — no duplicate); (iv) the authoritative full link on the 25.12 SDK — `make package/saadway/{clean,compile}` must now produce the `saadway` binary — folded into the T046/T057 on-device round.
 
 **Checkpoint**: the daemon links with no unresolved daemon-internal symbol; the context has exactly one owner; the link-surface check guards future rounds.
+
+## Phase 18: Remediation Round 7 — Standalone luci-app-saadway Package
+
+**Purpose**: Make the LuCI app buildable outside the upstream LuCI feed
+tree. The core daemon built and packaged (`saadway-1.0.0-r1.apk`), but
+the app failed with `make[1]: *** No rule to make target
+'package/luci-app-saadway/compile'. Stop.`
+
+**Root cause (verified):** `luci-app-saadway/Makefile` ends with
+`include $(TOPDIR)/feeds/luci/luci.mk` — that path exists only inside a
+full OpenWrt source tree with the luci feed checked out. In an SDK
+drop-in (`<sdk>/package/luci-app-saadway/`) the include resolves to
+nothing, so the package's `BuildPackage` is never evaluated: the
+metadata scanner does not register the package, and the build system
+has no `package/luci-app-saadway/compile` target to run. The app
+therefore needs a **standalone `package.mk` definition** that depends on
+nothing but the core SDK machinery.
+
+**Related gap found while assessing this (same files, same install
+pass):** the package ships **no LuCI menu entry**
+(`/usr/share/luci/menu.d/*.json`). In LuCI2 the client router builds its
+route tree from those menu JSONs, so a view that no menu entry
+references is not reachable through the UI — the documented
+"Administration → SaadWay" surface (quickstart Scenario 4, FR-022) could
+never appear. The standalone rewrite is the right moment to add it,
+because the file belongs to the same `root/` tree the new install rules
+handle.
+
+- [ ] T064: Convert luci-app-saadway/Makefile to standalone package.mk definition (missing) per Constitution I (Native Platform Compliance — a package must build with the standard OpenWrt 25.12 SDK machinery alone), Gate 1 (platform) / Gate 2 (footprint — `PKGARCH:=all`, no new runtime), and docs/verify-2512.md §9 (install-asset audit) + §10 (build-time record) — target file: `luci-app-saadway/Makefile`:
+  - `luci-app-saadway/Makefile` — replace the luci.mk-based definition with a self-contained package: `include $(TOPDIR)/rules.mk` + `include $(INCLUDE_DIR)/package.mk`, an explicit `define Package/luci-app-saadway` with `SECTION:=luci`, `CATEGORY:=LuCI`, `TITLE:=LuadWay…` (the current `LUCI_TITLE` text), `PKGARCH:=all`, `MAINTAINER`/`PKG_LICENSE` as today, and **`PKG_VERSION:=1.0.0` + `PKG_RELEASE:=1`** — the version fields are mandatory (the build system errors with "missing the VERSION field" without them; the luci.mk flow used to supply them implicitly). End the file with `$(eval $(call BuildPackage,luci-app-saadway))`.
+  - `luci-app-saadway/Makefile` — `Package/luci-app-saadway/install` must install exactly the three assets, with `$(INSTALL_DIR)` for each target directory and `$(INSTALL_DATA)` for the sources: `htdocs/luci-static/resources/view/saadway/dashboard.js` → `$(1)/www/luci-static/resources/view/saadway/`, `root/usr/share/rpcd/acl.d/luci-app-saadway.json` → `$(1)/usr/share/rpcd/acl.d/` (the session ACL that makes the view's `mgmt.*` calls work — Phase 14/T048), and the new menu entry → `$(1)/usr/share/luci/menu.d/`.
+  - `luci-app-saadway/root/usr/share/luci/menu.d/luci-app-saadway.json` (new) — register the view so the documented surface exists: a single "Administration" entry (`"admin/saadway"`) with `"action": {"type": "view", "path": "saadway/dashboard"}` (the view file is `resources/view/saadway/dashboard.js`) and `"depends": {"acl": ["luci-app-saadway"]}` — the ACL group already defined by this package's own `acl.d` file, so the menu entry and the RPC grant stay consistent. Keep the entry minimal: no configuration sub-menus (Principle V — the LuCI surface is status + toggle + dashboard link only, FR-022).
+  - `DEPENDS` — use `+saadway` (the daemon) and drop `+luci-base` from the hard dependency: an SDK staging tree may not carry the luci feed, and the app is inert without LuCI anyway (the page simply does not appear on a device without LuCI). When building an IMAGE that must pull LuCI in, add `+luci-base` explicitly in the image's package list instead of the app's DEPENDS.
+  - Verification per docs/verify-2512.md: (i) the Makefile includes `$(INCLUDE_DIR)/package.mk` and evaluates `BuildPackage` — no `feeds/luci` reference remains (grep); (ii) every file the install rules reference exists in the package tree (extend the §9 install-asset audit with the LuCI app's three assets); (iii) the app must still be architecture-independent (`PKGARCH:=all`) and must not ship a compiled binary; (iv) the authoritative proof — `make package/luci-app-saadway/compile` in the SDK layout that produced `saadway-1.0.0-r1.apk` — is folded into the T046/T057 round, together with the check that the page appears under Administration → SaadWay and that its two `saadway.mgmt.*` calls are authorized by the shipped ACL group.
+
+**Checkpoint**: `package/luci-app-saadway/compile` exists in an SDK-only tree; the app installs the view, its ACL and its menu entry; the LuCI surface is reachable and remains limited to status + toggle + link.
