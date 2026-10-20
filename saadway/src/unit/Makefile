@@ -6,7 +6,7 @@
 #   $(SWSTUBS)/shim_impl/cmocka_impl.c   cmocka-compatible runner macros
 #   $(SWSTUBS)/shim_impl/json_impl.c     json-c-compatible codec subset
 #   $(SWSTUBS)/shim_impl/mbedtls_impl.c  SHA-256 reference implementation
-# Declare-only stub headers (libuci.h, libubox/*, libubus.h, mbedtls) come
+# Declare-only stub headers (uci.h, libubox/*, libubus.h, mbedtls) come
 # from the same pool; the uci shim fails closed (shim_uci.c below).
 
 CC     ?= cc

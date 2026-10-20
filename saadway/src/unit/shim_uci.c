@@ -5,7 +5,8 @@
  * missing/failing backing store would on-device, so units' error paths
  * are validated. Set SW_UNIT_STRICT_SHIM=1 to escalate any shim hit into
  * an abort (for debugging an out-of-scope path).
- * Declarations come from the repo syntax stub libuci.h.
+ * Declarations come from the repo syntax stub uci.h (the real OpenWrt
+ * libuci header name — the stub pool mirrors upstream names exactly).
  */
 #define _GNU_SOURCE
 #include "saadway.h"
@@ -14,7 +15,7 @@
 #include <stdio.h>
 #include <assert.h>
 
-#include <libuci.h>
+#include <uci.h>
 #include <stdlib.h>
 
 static int hit(const char *what)

@@ -29,6 +29,13 @@ PKG_CONFIG_DEPENDS:= \
 
 include $(INCLUDE_DIR)/package.mk
 
+# T060: export the target staging include path to the delegated sub-make.
+# Upstream's default Build/Compile folds TARGET_CPPFLAGS into CFLAGS
+# (include/package-defaults.mk: MAKE_VARS), so the staged headers of the
+# already-declared dependencies (+libuci, +libubox, +libubus, +libjson-c)
+# resolve without any custom Build/Compile block.
+TARGET_CPPFLAGS += -I$(STAGING_DIR)/usr/include
+
 define Package/saadway
 	SECTION:=net
 	CATEGORY:=Network

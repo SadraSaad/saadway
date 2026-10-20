@@ -28,7 +28,7 @@
 
 #include <libubox/uloop.h>
 #include <libubus.h>
-#include <libuci.h>
+#include <uci.h>
 #include <json-c/json.h>
 
 /* ------------------------------------------------------------------ */

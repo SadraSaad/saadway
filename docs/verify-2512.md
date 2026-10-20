@@ -438,6 +438,24 @@ this phase; each traces to the appended tasks.md lines.
   from this class of error because the DEV-ONLY stub pool named its
   declare-only header `libuci.h` — the pool must mirror real OpenWrt
   header names from now on.
+* **Phase 14 / T060 applied.** `saadway/src/saadway.h` now includes
+  `<uci.h>`; `saadway/Makefile` exports
+  `TARGET_CPPFLAGS += -I$(STAGING_DIR)/usr/include` (upstream folds it into
+  `CFLAGS` — no custom `Build/Compile`); `saadway/src/Makefile` selects the
+  compiler with an **origin guard** (`ifeq ($(origin CC),default)` →
+  `CC := $(CROSS)gcc`): GNU make predefines `CC=cc` and `?=` does NOT
+  override a built-in default, so the earlier `CC ?= $(CROSS)gcc` draft
+  would have kept the HOST compiler — the same "no such file or
+  directory" symptom the SDK reported. The dev-only stub pool now
+  provides `uci.h` (real name) and the misleading `libuci.h` was removed
+  so it cannot mask the name again. Host evidence: 13/13 modules
+  `gcc -fsyntax-only` clean against the renamed stub; `make -C
+  saadway/src -n` shows `aarch64-linux-musl-gcc … -I<staging>/usr/include
+  …` under upstream's variable set, `gcc` on a host run, and an explicit
+  `CC=` still winning; a real object build through the new rule succeeds
+  and `make clean` removes it; unit suite 21/21. The authoritative
+  `make package/saadway/{clean,compile}` on `ipq40xx/chromium` stays in
+  the T046/T057 on-device round.
 
 ---
 
