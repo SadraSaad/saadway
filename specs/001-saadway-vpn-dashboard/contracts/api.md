@@ -106,14 +106,17 @@ All steer mutations re-apply policy atomically; tunnel stays up
 | 500 | internal failure (fail-closed state reported via `mgmt.status`) |
 
 These labels are CLASS tags; the concrete wire codes over the legacy
-`POST /ubus` endpoint are libubus statuses inside `result[0]`:
-`UBUS_STATUS_INVALID_ARGUMENT=1` (400 classes), `UBUS_STATUS_NOT_FOUND=2`
-(404 classes), `UBUS_STATUS_UNKNOWN_ERROR=6` / `CONNECTION_FAILED=7`
-(500 classes), `UBUS_STATUS_PERMISSION_DENIED=9` (401 classes — wrong
-credentials), and uhttpd's own JSON-RPC envelopes `-32002` "Access
-denied" / `-32000` "Object not found" / `-32003` request timeout for
-pre-call rejections. Full mapping and on-device checklist:
-`docs/verify-2512.md` (T-verify-6).
+`POST /ubus` endpoint are libubus statuses inside `result[0]` — the
+upstream `ubusmsg.h` enum is **0-based**: `UBUS_STATUS_INVALID_ARGUMENT=2`
+(400 classes), `UBUS_STATUS_NOT_FOUND=4` (404 classes),
+`UBUS_STATUS_PERMISSION_DENIED=6` (401 classes — wrong credentials;
+rpcd's `rpc_handle_login` returns exactly this),
+`UBUS_STATUS_TIMEOUT=7` (transient — never a re-login trigger),
+`UBUS_STATUS_UNKNOWN_ERROR=9` (500 classes),
+`UBUS_STATUS_CONNECTION_FAILED=10` (transport), and uhttpd's own
+JSON-RPC envelopes `-32002` "Access denied" / `-32000` "Object not found"
+/ `-32003` request timeout for pre-call rejections. Full mapping and
+on-device checklist: `docs/verify-2512.md` (T-verify-6, Phase 15/T061).
 
 ## LuCI page surface (FR-022 — nothing more)
 

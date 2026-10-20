@@ -140,19 +140,18 @@ static long now_ms(void)
 static void act_reply_free(struct sw_ctx *c, bool with_error,
 			   const char *detail)
 {
-	if (!c->act.dreq)
+	if (!c->act.dreq_active)
 		return;
 	if (with_error) {
 		blob_buf_init(&bb, 0);
 		blobmsg_add_string(&bb, "detail", detail ? detail :
 				   "activation failed");
-		ubus_send_reply(c->ubus, &c->act.dreq->hdr, bb.head);
+		ubus_send_reply(c->ubus, &c->act.dreq, bb.head);
 		blob_buf_free(&bb);
-		ubus_complete_deferred_request(c->ubus, c->act.dreq,
+		ubus_complete_deferred_request(c->ubus, &c->act.dreq,
 					       UBUS_STATUS_UNKNOWN_ERROR);
 	}
-	free(c->act.dreq);
-	c->act.dreq = NULL;
+	c->act.dreq_active = false;
 }
 
 /* success path: the L3 interface was verified → atomic open + UP */
@@ -186,16 +185,15 @@ static void verified_up(struct sw_ctx *c)
 	sw_info("activation '%s' verified (iface=%s, %ld ms)",
 		p->name, p->ifname, elapsed);
 
-	if (c->act.dreq) {
+	if (c->act.dreq_active) {
 		blob_buf_init(&bb, 0);
 		blobmsg_add_string(&bb, "switched_to", p->name);
 		blobmsg_add_u32(&bb, "elapsed_ms", (uint32_t)elapsed);
-		ubus_send_reply(c->ubus, &c->act.dreq->hdr, bb.head);
+		ubus_send_reply(c->ubus, &c->act.dreq, bb.head);
 		blob_buf_free(&bb);
-		ubus_complete_deferred_request(c->ubus, c->act.dreq,
+		ubus_complete_deferred_request(c->ubus, &c->act.dreq,
 					       UBUS_STATUS_OK);
-		free(c->act.dreq);
-		c->act.dreq = NULL;
+		c->act.dreq_active = false;
 	}
 	c->act.pending = false;
 	c->act.prof = NULL;
@@ -228,13 +226,14 @@ int sw_activate_profile(struct sw_ctx *c, struct sw_profile *p,
 	}
 
 	/* deferred reply for the switch report (SC-001 ≤10 s)            */
-	free(c->act.dreq);
-	c->act.dreq = NULL;
+	c->act.dreq_active = false;
 	if (req && c->ubus) {
-		if (ubus_defer_request(c->ubus, req, &c->act.dreq) != 0) {
-			c->act.dreq = NULL;
-			return -1;
-		}
+		/* T061: upstream API — ubus_defer_request() is void (it copies
+		 * the request data and marks the original deferred), so there
+		 * is no error return to test: the in-flight state is tracked
+		 * by the dreq_active flag. */
+		ubus_defer_request(c->ubus, req, &c->act.dreq);
+		c->act.dreq_active = true;
 	}
 
 	c->st.conn_status = SW_CONN_CONNECTING;
@@ -251,16 +250,15 @@ int sw_activate_profile(struct sw_ctx *c, struct sw_profile *p,
 					  sw_ikev2_start(c, p);
 	if (rc != 0) {
 		/* synchronous spawn failure: reply + roll immediately    */
-		if (c->act.dreq) {
+		if (c->act.dreq_active) {
 			blob_buf_init(&bb, 0);
 			blobmsg_add_string(&bb, "detail",
 					   "spawn failed (see log)");
-			ubus_send_reply(c->ubus, &c->act.dreq->hdr, bb.head);
+			ubus_send_reply(c->ubus, &c->act.dreq, bb.head);
 			blob_buf_free(&bb);
-			ubus_complete_deferred_request(c->ubus, c->act.dreq,
+			ubus_complete_deferred_request(c->ubus, &c->act.dreq,
 					UBUS_STATUS_UNKNOWN_ERROR);
-			free(c->act.dreq);
-			c->act.dreq = NULL;
+			c->act.dreq_active = false;
 		}
 		c->act.pending = false;
 		c->act.prof = NULL;

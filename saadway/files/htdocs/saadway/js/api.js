@@ -15,15 +15,19 @@
  * dashboard additionally requests the configured TTL at login — the
  * `session_timeout` field of `mgmt.status` (dashboard.session_timeout,
  * 1800 s default; the pre-status first login uses the 1800 s fallback).
- * On-device mapping (docs/verify-2512.md, T-verify-6): over the legacy
- * POST /ubus path of uhttpd-mod-ubus, failures surface as result arrays
- * with a nonzero ubus status code — 9 (UBUS_STATUS_PERMISSION_DENIED) on
- * wrong login credentials; the modern {error:{code,...}} envelope is used
+ * On-device mapping (docs/verify-2512.md, T-verify-6, Phase 15/T061):
+ * over the legacy POST /ubus path of uhttpd-mod-ubus, failures surface
+ * as result arrays with a nonzero ubus status code — 6
+ * (UBUS_STATUS_PERMISSION_DENIED) on wrong login credentials: rpcd's
+ * rpc_handle_login returns exactly that, and the upstream ubusmsg.h enum
+ * is 0-based (PERMISSION_DENIED=6, TIMEOUT=7, UNKNOWN_ERROR=9,
+ * CONNECTION_FAILED=10); the modern {error:{code,...}} envelope is used
  * by uhttpd itself for pre-call rejections (-32002 "Access denied",
  * -32000 "Object not found", -32003 request timeout). The client treats
  * any nonzero code as an error and denial-class codes as re-login
- * triggers (session loss → login screen); 17/401/-1 are defensive
- * forward-compat slots pending the on-device observation record.
+ * triggers (session loss → login screen); 7 (TIMEOUT) is a transport
+ * condition and must NOT trigger a re-login; 9/17/401/-1 are defensive
+ * forward-compat slots.
  */
 
 "use strict";
@@ -82,8 +86,12 @@ window.SwApi = (function () {
 	}
 
 	function isDenied(code) {
-		/* PERMISSION_DENIED-ish codes across servers; T-verify-6 */
-		return code === 9 || code === 17 || code === 401 || code === -1;
+		/* PERMISSION_DENIED-ish codes across servers; T-verify-6/T061 —
+		 * 6 = UBUS_STATUS_PERMISSION_DENIED (upstream 0-based enum;
+		 * rpcd's login failure). 7 (TIMEOUT) is transport and stays
+		 * OUT of the re-login trigger set. */
+		return code === 6 || code === 9 || code === 17 || code === 401 ||
+			code === -1;
 	}
 
 	function call(object, method, msg) {

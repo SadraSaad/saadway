@@ -200,7 +200,13 @@ struct sw_activate {
 	long deadline;                  /* monotonic target time */
 	struct sw_profile *prof;
 	long started;                   /* ms clock: elapsed_ms in reply */
-	struct ubus_deferred_request *dreq; /* profile.activate reply     */
+	/* T061: upstream libubus API — the deferred handle is a plain
+	 * struct ubus_request_data VALUE (there is no
+	 * struct ubus_deferred_request type upstream) and
+	 * ubus_defer_request() returns void, so the "reply in flight"
+	 * state needs an explicit flag. */
+	struct ubus_request_data dreq;  /* profile.activate reply       */
+	bool dreq_active;               /* deferred reply in flight      */
 };
 
 struct sw_failover {

@@ -82,8 +82,12 @@ From `openwrt/rpcd` `session.c` (master, fetched 2026-10):
      unused here).
 * The UCI login section is found by scanning ALL `config login` sections of
   `/etc/config/rpcd` for an exact `username` match, then testing the
-  password. **Wrong credentials return `UBUS_STATUS_PERMISSION_DENIED (9)`** —
-  that is the `result[0]==9` the dashboard re-login logic keys on.
+  password. **Wrong credentials return `UBUS_STATUS_PERMISSION_DENIED (6)`**
+  — rpcd's `rpc_handle_login()` sets `rv = UBUS_STATUS_PERMISSION_DENIED`
+  when no login section matches, and the upstream `ubusmsg.h` enum is
+  0-based (`PERMISSION_DENIED=6`, `TIMEOUT=7`, `UNKNOWN_ERROR=9`,
+  `CONNECTION_FAILED=10`). That is the `result[0]==6` the dashboard
+  re-login logic keys on.
 * ACLs: after login, rpcd runs
   `glob(RPC_SESSION_ACL_DIR "/*.json")` over `/usr/share/rpcd/acl.d/` and
   grants everything whose access group matches the section's
@@ -104,7 +108,7 @@ From `openwrt/rpcd` `session.c` (master, fetched 2026-10):
   grep proves the `password '$p$saadway-admin'` option in
   /etc/config/rpcd section `saadway_admin`.
 * Login with the right password works; with a wrong one returns
-  `result[0]==9` (T-verify-6 recipe).
+  `result[0]==6` (`UBUS_STATUS_PERMISSION_DENIED`, T-verify-6 recipe).
 
 ## 3. T-verify-2 — strongSwan / XFRM package set
 
@@ -161,12 +165,13 @@ Legacy `POST /ubus` (the transport our SPA uses):
 
 | observed surface | code | meaning | SPA action |
 |---|---|---|---|
-| `result[0] == 0` | 0 | ok (`result[1]` payload) | proceed |
-| rpcd login failure or handler denial | **9** (`UBUS_STATUS_PERMISSION_DENIED`) | wrong credentials / denied | re-login trigger |
-| handler validation error | **1** (`UBUS_STATUS_INVALID_ARGUMENT`) | 400-class, `detail` string in error payload | surface error |
-| unknown named resource | **2** (`UBUS_STATUS_NOT_FOUND`) | 404-class | surface error |
-| daemon internal failure | **6** (`UBUS_STATUS_UNKNOWN_ERROR`) | 500-class | surface error |
-| ubus not reachable/transport | **7** (`UBUS_STATUS_CONNECTION_FAILED`) | transient | surface error (NOT a re-login trigger) |
+| `result[0] == 0` | 0 | `UBUS_STATUS_OK` | ok (`result[1]` payload) | proceed |
+| rpcd login failure or handler denial | **6** (`UBUS_STATUS_PERMISSION_DENIED`) | wrong credentials / denied | re-login trigger |
+| handler validation error | **2** (`UBUS_STATUS_INVALID_ARGUMENT`) | 400-class, `detail` string in error payload | surface error |
+| unknown named resource | **4** (`UBUS_STATUS_NOT_FOUND`) | 404-class | surface error |
+| daemon internal failure | **9** (`UBUS_STATUS_UNKNOWN_ERROR`) | 500-class | surface error |
+| ubus timeout | **7** (`UBUS_STATUS_TIMEOUT`) | transient | surface error (NOT a re-login trigger) |
+| ubus not reachable/transport | **10** (`UBUS_STATUS_CONNECTION_FAILED`) | transient | surface error (NOT a re-login trigger) |
 | default session lost / unknown sid | −32001 "-32001 Session not found*" | defensive (upstream defines it; current uhttpd flow uses −32002) | re-login trigger |
 | uhttpd ACL pre-check denial | **−32002** "Access denied" | session lacks the ACL tuple | re-login trigger |
 | unknown object | −32000 "Object not found" | object absent | surface error |
@@ -189,7 +194,7 @@ any nonzero is already an error banner).
 
 1. bad password:
    `curl -s http://<lan-ip>/ubus -d '{"jsonrpc":"2.0","id":1,"method":"call","params":["00000000000000000000000000000000","session","login",{"username":"saadway-admin","password":"wrong"}]}'`
-   → `result[0] == 9`.
+   → `result[0] == 6` (`UBUS_STATUS_PERMISSION_DENIED`).
 2. valid token, then a call with a fabricated token:
    → `error.code == -32002` (or `result[0]` nonzero with the SPA fallback
    shape — record whichever envelope appears in the T046 table).
@@ -292,6 +297,30 @@ The host syntax-check (all 13 modules, `gcc -fsyntax-only`) and the unit
 suite must be re-run against the **corrected** stub; the authoritative
 `<libubus.h>` match is confirmed by the on-device/rebuild compile
 (T046 pre-step `make` on the router SDK or package build).
+* **Phase 15 / T061 applied.** The daemon now uses the upstream API
+  exactly: `saadway/src/saadway.h` holds `struct ubus_request_data dreq;`
+  plus `bool dreq_active;` (no `struct ubus_deferred_request` anywhere);
+  `main.c` defers with the void `ubus_defer_request()` and replies via
+  `ubus_send_reply(ctx, &dreq, …)` / `ubus_complete_deferred_request(ctx,
+  &dreq, status)` (no `->hdr` — `ubus_request_data` has no such member,
+  no `free()` — the handle is a value); `ubus.c`'s `mon.health_test` path
+  received the same correction, and it now **defers before starting the
+  probe** (the async reply can no longer race ahead of the deferral) and
+  reports a start failure through the deferred completion instead of a
+  plain reply. The dev-only stub pool mirrors upstream verbatim
+  (`static inline void ubus_defer_request` with the memcpy +
+  `req->deferred = true` semantics) and the fictional type is gone.
+  Status mapping corrected against rpcd's `rpc_handle_login` (which sets
+  `UBUS_STATUS_PERMISSION_DENIED`) and the 0-based upstream enum:
+  `PERMISSION_DENIED=6`, `TIMEOUT=7`, `UNKNOWN_ERROR=9`,
+  `CONNECTION_FAILED=10`, `INVALID_ARGUMENT=2`, `NOT_FOUND=4` — the
+  SPA's `isDenied` set now includes **6** and keeps **7** out of the
+  re-login trigger; `contracts/api.md`, §5/§6 and the §2/§5 checklists
+  were updated accordingly. Host evidence: 13/13 modules
+  `gcc -fsyntax-only` clean against the corrected stub; unit suite 21/21;
+  `make -C saadway/src -n` pipeline and link line unchanged; no residual
+  fictional-API reference outside explanatory comments. The authoritative
+  SDK build stays in the T046/T057 on-device round.
 
 ## 9. Footprint pointers → T045
 

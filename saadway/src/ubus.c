@@ -28,7 +28,10 @@ static struct blob_buf bb;
 
 struct htest {                    /* deferred state for mon.health_test */
 	struct ubus_context *ctx;
-	struct ubus_deferred_request *dreq;
+	/* T061: upstream libubus API — the deferred handle is a plain
+	 * struct ubus_request_data value; ubus_defer_request() is void. */
+	struct ubus_request_data dreq;
+	bool dreq_active;               /* deferred reply in flight         */
 };
 
 static struct htest g_htest;
@@ -916,12 +919,11 @@ static void htest_reply(struct sw_ctx *c, bool done)
 		blobmsg_close_table(&bb, t);
 	}
 	/* the deferred request carries its own target identity */
-	ubus_send_reply(g_htest.ctx, &g_htest.dreq->hdr, bb.head);
+	ubus_send_reply(g_htest.ctx, &g_htest.dreq, bb.head);
 	blob_buf_free(&bb);
-	ubus_complete_deferred_request(g_htest.ctx, g_htest.dreq,
+	ubus_complete_deferred_request(g_htest.ctx, &g_htest.dreq,
 				       UBUS_STATUS_OK);
-	free(g_htest.dreq);
-	g_htest.dreq = NULL;
+	g_htest.dreq_active = false;
 }
 
 static int h_mon_health_test(struct ubus_context *ctx,
@@ -935,19 +937,24 @@ static int h_mon_health_test(struct ubus_context *ctx,
 	(void)method;
 	arg_missing(obj);
 	(void)msg;
-	if (g_htest.dreq)
+	if (g_htest.dreq_active)
 		return reply_error(ctx, req, UBUS_STATUS_UNKNOWN_ERROR,
 				   "health test already running");
-	if (sw_health_run(c, htest_reply) != 0)
-		return reply_error(ctx, req, UBUS_STATUS_UNKNOWN_ERROR,
-				   "health test start failed");
-	if (ubus_defer_request(ctx, req, &g_htest.dreq) != 0 ||
-	    !g_htest.dreq) {
-		sw_health_abort();
-		return reply_error(ctx, req, UBUS_STATUS_UNKNOWN_ERROR,
-				   "deferred request failed");
-	}
+	/* T061: defer BEFORE starting the probe — the upstream deferral marks
+	 * the request deferred, so the asynchronous reply can never race
+	 * ahead of the deferral itself. */
+	ubus_defer_request(ctx, req, &g_htest.dreq);
+	g_htest.dreq_active = true;
 	g_htest.ctx = ctx;
+	if (sw_health_run(c, htest_reply) != 0) {
+		sw_health_abort();
+		g_htest.dreq_active = false;
+		/* the request is already deferred: report the failure through
+		 * the deferred completion, not a plain reply */
+		ubus_complete_deferred_request(ctx, &g_htest.dreq,
+					       UBUS_STATUS_UNKNOWN_ERROR);
+		return UBUS_STATUS_OK;
+	}
 	return UBUS_STATUS_OK;
 }
 
