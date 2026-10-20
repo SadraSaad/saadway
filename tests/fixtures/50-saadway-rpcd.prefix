@@ -1,0 +1,29 @@
+#!/bin/sh
+# 50-saadway-rpcd — rpcd login mapping for the dedicated dashboard user (T032)
+#
+# Auth bridge (FR-020, research D7, constitution Principle IV):
+# - rpcd session.login validates /etc/config/rpcd 'config login' sections via
+#   crypt(3); option password '$p$<user>' = the hash is referenced from
+#   /etc/shadow — so NO credential material ever lands in a world-readable UCI
+#   option (the hash stays in the 0600 /etc/shadow file, written by `passwd`).
+# - The actual 'saadway-admin' system user is NOT created here; provisioning
+#   goes through /usr/libexec/saadway/provision (files/saadway-provision), so
+#   the first-login step sets the password deliberately over SSH.
+# - The login section below maps the user to the least-privilege ACL access
+#   group 'saadway' (files/rpc-acl.json → /usr/share/rpcd/acl.d/saadway.json).
+# - Until provisioning has created the user, session.login('saadway-admin', …)
+#   fails closed (getspnam lookup fails) — never fail open.
+#
+# IMPORTANT: the heredoc is quoted ('EOF') so '$p$' reaches uci verbatim.
+
+if ! uci -q get rpcd.saadway_admin >/dev/null 2>&1; then
+	uci -q batch <<'EOF'
+add rpcd login
+rename rpcd.@login[-1]='saadway_admin'
+set rpcd.saadway_admin.username='saadway-admin'
+set rpcd.saadway_admin.password='$p$saadway-admin'
+add_list rpcd.saadway_admin.read='saadway'
+add_list rpcd.saadway_admin.write='saadway'
+EOF
+fi
+exit 0

@@ -1,6 +1,6 @@
 {
 	"saadway": {
-		"description": "SaadWay dashboard RPC surface (Principle V: authenticated LAN sessions only; least privilege — strictly the saadway.* object methods, nothing system-wide). Attached to the 'saadway-admin' login via /etc/config/rpcd 'list read saadway'/'list write saadway' (uci-defaults/50-saadway-rpcd). Root sessions map LuCI's own trust path and are not further restricted here.",
+		"description": "SaadWay dashboard RPC surface (Principle V: authenticated LAN sessions only; least privilege — strictly the saadway.* object methods, nothing system-wide). Attached to the 'admin' login via /etc/config/rpcd 'list read saadway'/'list write saadway' (uci-defaults/50-saadway-rpcd). Root sessions map LuCI's own trust path and are not further restricted here.",
 		"read": {
 			"ubus": {
 				"saadway": [

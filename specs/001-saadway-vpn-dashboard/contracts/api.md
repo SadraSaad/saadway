@@ -21,7 +21,7 @@ Login:
 ```json
 { "jsonrpc":"2.0", "id":1, "method":"call",
   "params": [ "00000000000000000000000000000000", "session", "login",
-              { "username":"saadway-admin", "password":"<secret>" } ] }
+              { "username":"admin", "password":"<secret>" } ] }
 ```
 
 Response carries `ubus_rpc_session` (the token). Session tokens expire on
@@ -29,11 +29,20 @@ inactivity (`dashboard.session_timeout`, default 1800 s; the dashboard
 requests the configured TTL at `session.login` using the
 `session_timeout` field returned by `mgmt.status`, falling back to
 1800 s before the first successful status call) and are never
-reused across devices. `username=saadway-admin` is validated by rpcd via
-the `$p$saadway-admin` shadow bridge (provisioned by
+reused across devices. `username=admin` is validated by rpcd via
+the `$p$admin` shadow bridge (provisioned by
 `saadway-provision`; docs/verify-2512.md §2 — no daemon-side credential
 store, Constitution IV); `username=root` invokes system-root
 authentication mode.
+
+The dashboard ships with the **default credential `admin` / `admin`**:
+`/usr/libexec/saadway/provision` creates the nologin user `admin` and
+applies the default password non-interactively — the plaintext is handed to
+the password setter over stdin and only the crypt(3) hash reaches the 0600
+`/etc/shadow` (never a UCI option, never a command argument, never the SPA
+page source). The default is changed with
+`/usr/libexec/saadway/provision passwd`; the compensating controls for the
+weak default are listed in docs/verify-2512.md §7.
 
 ---
 

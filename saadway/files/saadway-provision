@@ -3,21 +3,33 @@
 #
 # Installs to /usr/libexec/saadway/provision. Run over SSH:
 #
-#   /usr/libexec/saadway/provision set      # interactive: set dashboard password
+#   /usr/libexec/saadway/provision set      # create the user + default password
+#   /usr/libexec/saadway/provision passwd    # change the password (interactive)
 #   /usr/libexec/saadway/provision unset    # remove the dashboard user
 #
 # Design (verified against rpcd source, docs/verify-2512.md T-verify-5):
 # rpcd's session.login tests /etc/config/rpcd 'config login' sections with
 # crypt(3); '$p$<user>' delegates the hash lookup to /etc/shadow (a 0600
-# file). We therefore provision a system user 'saadway-admin' (nologin shell,
-# no home write access) whose hash lives ONLY in /etc/shadow — never in
+# file). We therefore provision a system user 'admin' (nologin shell, no home
+# write access) whose hash lives ONLY in /etc/shadow — never in
 # world-readable UCI options (Principle IV). The rpcd login section mapping
 # the user to the least-privilege 'saadway' ACL group ships via
 # /etc/uci-defaults/50-saadway-rpcd.
+#
+# T072: the dashboard ships with the default credential 'admin' / 'admin'.
+# The default password is applied NON-INTERACTIVELY and only ever as a
+# crypt(3) hash in the 0600 /etc/shadow file: the plaintext is handed to the
+# password setter over STDIN (never as an argument — argv is readable through
+# /proc/<pid>/cmdline), and it never reaches a UCI option, a log or the SPA
+# page source. A well-known default is weak: the account is nologin, the ACL
+# grant is least-privilege and the uhttpd listener is LAN-bound; run
+# `provision passwd` to leave the default behind.
 
 set -u
 
-USER=saadway-admin
+USER='admin'
+LEGACY_USER='saadway-admin'
+DEFAULT_PASSWORD='admin'
 PASSWD=/etc/passwd
 SHADOW=/etc/shadow
 UID_DASH=${SAADWAY_DASH_UID:-355}
@@ -34,6 +46,42 @@ user_exists() {
 
 shadow_exists() {
 	grep -qs "^${USER}:" "$SHADOW"
+}
+
+# ---------------------------------------------------------------------
+# password handling — the plaintext never becomes a command argument
+# ---------------------------------------------------------------------
+
+# Rewrite the user's /etc/shadow row with the given crypt hash (staged,
+# atomic, 0600). Used by the cryptpw fallback.
+set_shadow_hash() {
+	grep -v "^${USER}:" "$SHADOW" > "$SHADOW.saadway.tmp" 2>/dev/null || return 1
+	printf '%s:%s:0:0:99999:7:::\n' "$USER" "$1" >> "$SHADOW.saadway.tmp" || return 1
+	chmod 0600 "$SHADOW.saadway.tmp"
+	mv "$SHADOW.saadway.tmp" "$SHADOW"
+}
+
+# set_password <plaintext> — apply the password without ever exposing it in
+# argv. Preferred: chpasswd (reads "user:password" from stdin). Fallbacks:
+# passwd fed from stdin, then cryptpw + a staged /etc/shadow rewrite.
+# Fails closed when no setter is available.
+set_password() {
+	if command -v chpasswd >/dev/null 2>&1; then
+		printf '%s:%s\n' "$USER" "$1" | chpasswd >/dev/null 2>&1 && return 0
+		return 1
+	fi
+	if command -v passwd >/dev/null 2>&1; then
+		printf '%s\n' "$1" | passwd "$USER" >/dev/null 2>&1 && return 0
+		return 1
+	fi
+	if command -v cryptpw >/dev/null 2>&1; then
+		hash=$(printf '%s' "$1" | cryptpw -m sha512 2>/dev/null)
+		[ -n "$hash" ] || hash=$(printf '%s' "$1" | cryptpw 2>/dev/null)
+		[ -n "$hash" ] || return 1
+		set_shadow_hash "$hash" || return 1
+		return 0
+	fi
+	return 1
 }
 
 # /etc/passwd line: shell /bin/false, crypt placeholder x in shadow form:
@@ -72,22 +120,41 @@ do_add_by_file() {
 	return 0
 }
 
+# remove a user's rows from /etc/passwd and /etc/shadow (staged, atomic)
+remove_user_rows() {
+	grep -qs "^$1:" "$PASSWD" || grep -qs "^$1:" "$SHADOW" || return 0
+	cp "$PASSWD" "$PASSWD.tmp.$$" 2>/dev/null || fail "cannot stage $PASSWD"
+	grep -v "^$1:" "$PASSWD" > "$PASSWD.tmp.$$"
+	mv "$PASSWD.tmp.$$" "$PASSWD" || fail "passwd replace failed"
+
+	cp "$SHADOW" "$SHADOW.tmp.$$" 2>/dev/null || fail "cannot stage $SHADOW"
+	grep -v "^$1:" "$SHADOW" > "$SHADOW.tmp.$$"
+	chmod 0600 "$SHADOW.tmp.$$"
+	mv "$SHADOW.tmp.$$" "$SHADOW" || fail "shadow replace failed"
+}
+
+# the pre-T072 account — its rows must not survive the migration, or the old
+# credential would remain usable on an upgraded device
+do_remove_legacy() {
+	grep -qs "^${LEGACY_USER}:" "$PASSWD" || grep -qs "^${LEGACY_USER}:" "$SHADOW" || {
+		echo "provision: no legacy '$LEGACY_USER' account to remove"
+		return 0
+	}
+	remove_user_rows "$LEGACY_USER"
+	echo "provision: legacy '$LEGACY_USER' account removed"
+}
+
 do_del() {
-	user_exists || { echo "provision: '$USER' not provisioned"; return 0; }
+	user_exists || {
+		do_remove_legacy
+		restart_rpcd
+		return 0
+	}
 
 	command -v deluser >/dev/null 2>&1 && deluser --remove-home=no "$USER" 2>/dev/null
 	# guarantee removal from both files with atomic staged rewrites
-	if user_exists; then
-		cp "$PASSWD" "$PASSWD.tmp.$$" || fail "cannot stage $PASSWD"
-		grep -v "^${USER}:" "$PASSWD" > "$PASSWD.tmp.$$"
-		mv "$PASSWD.tmp.$$" "$PASSWD" || fail "passwd replace failed"
-	fi
-	if shadow_exists; then
-		cp "$SHADOW" "$SHADOW.tmp.$$" || fail "cannot stage $SHADOW"
-		grep -v "^${USER}:" "$SHADOW" > "$SHADOW.tmp.$$"
-		chmod 0600 "$SHADOW.tmp.$$"
-		mv "$SHADOW.tmp.$$" "$SHADOW" || fail "shadow replace failed"
-	fi
+	remove_user_rows "$USER"
+	do_remove_legacy
 	delgroup saadway 2>/dev/null || true
 	echo "provision: passwd/shadow rows for '$USER' removed"
 }
@@ -106,18 +173,31 @@ umask 077
 case "${1:-set}" in
 	set)
 		do_add
+		# The default password is applied non-interactively: the plaintext
+		# goes to the setter over stdin and only the crypt(3) hash reaches
+		# /etc/shadow (0600). Never in argv, never in UCI, never in a log.
+		set_password "$DEFAULT_PASSWORD" || \
+			fail "could not apply the password (no usable chpasswd/passwd/cryptpw); the account was left without a hash"
+		do_remove_legacy
+		restart_rpcd
+		echo "provision: dashboard login '$USER' ready (ACL group: saadway)"
+		echo "provision: WARNING — the DEFAULT password is in use; change it with:"
+		echo "provision:          /usr/libexec/saadway/provision passwd"
+		;;
+	passwd)
+		user_exists || fail "'$USER' is not provisioned (run '$0 set' first)"
 		# busybox passwd handles the interactive hash materialization
 		# (writes crypt(3) into /etc/shadow; hashes never touch stdout).
 		passwd "$USER" || fail "password assignment failed"
 		restart_rpcd
-		echo "provision: dashboard login '$USER' ready (ACL group: saadway)"
+		echo "provision: password for '$USER' changed"
 		;;
 	unset)
 		do_del
 		restart_rpcd
 		;;
 	*)
-		echo "usage: $0 {set|unset}" >&2
+		echo "usage: $0 {set|passwd|unset}" >&2
 		exit 2
 		;;
 esac

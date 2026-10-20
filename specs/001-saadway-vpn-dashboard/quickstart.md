@@ -38,12 +38,16 @@ apk add saadway luci-app-saadway openvpn-openssl \
 ```
 
 Before the first dashboard login, provision the dedicated credential over
-SSH: `/usr/libexec/saadway/provision` creates the nologin user
-`saadway-admin` and sets its `/etc/shadow` password hash — credential
-material never lives in a world-readable UCI option (Constitution IV; rpcd
-mechanics source-verified in docs/verify-2512.md §2). Log in as
-`saadway-admin`; sessions expire after `dashboard.session_timeout` (1800 s)
-of inactivity. Alternative mode: set
+SSH: `/usr/libexec/saadway/provision` creates the nologin user `admin` and
+applies the DEFAULT password `admin` non-interactively — the plaintext goes
+to the password setter over stdin and only the crypt(3) hash reaches the
+0600 `/etc/shadow`, so credential material never lives in a world-readable
+UCI option (Constitution IV; rpcd mechanics source-verified in
+docs/verify-2512.md §2). Log in as `admin` with the password `admin`;
+sessions expire after `dashboard.session_timeout` (1800 s) of inactivity.
+The default is a known credential — change it with
+`/usr/libexec/saadway/provision passwd` (the compensating controls are
+listed in docs/verify-2512.md §7). Alternative mode: set
 `saadway.dashboard.authentication='system'` and log in with root instead.
 
 ## Scenario 1 — Profile import/creation & activation (Story 1; Gate 4)

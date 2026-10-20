@@ -25,16 +25,18 @@ config service 'service'
 ```conf
 config dashboard 'dashboard'
     option language 'fa'          # fa|en (Q4-A Persian-first; switch persists per-browser)
-    option authentication 'dedicated'  # dedicated = rpcd 'saadway-admin' shadow bridge;
+    option authentication 'dedicated'  # dedicated = rpcd 'admin' shadow bridge;
                                   # 'system' = log in as root (FR-020 alternative)
     option session_timeout '1800'
 ```
 
 Credential material is never a UCI option: the dedicated user's hash lives
 in `/etc/shadow`, referenced from `/etc/config/rpcd` as
-`option password '$p$saadway-admin'` (uci-defaults/50-saadway-rpcd +
-`saadway-provision`). The option values here are presentation/lifecycle
-preferences only.
+`option password '$p$admin'` (uci-defaults/50-saadway-rpcd +
+`saadway-provision`). The dashboard ships with the default credential
+`admin` / `admin`; the password is applied by `saadway-provision` over
+stdin and is changed with `saadway-provision passwd`. The option values here
+are presentation/lifecycle preferences only.
 
 ## Section types
 

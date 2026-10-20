@@ -6,24 +6,40 @@
 #   crypt(3); option password '$p$<user>' = the hash is referenced from
 #   /etc/shadow — so NO credential material ever lands in a world-readable UCI
 #   option (the hash stays in the 0600 /etc/shadow file, written by `passwd`).
-# - The actual 'saadway-admin' system user is NOT created here; provisioning
-#   goes through /usr/libexec/saadway/provision (files/saadway-provision), so
-#   the first-login step sets the password deliberately over SSH.
+#   Upstream resolves the '$p$<name>' suffix with getspnam(<name>), so the
+#   suffix MUST name the shadow row of the login user (T072).
+# - The 'admin' system user is NOT created here; provisioning goes through
+#   /usr/libexec/saadway/provision (files/saadway-provision), which creates
+#   the account and applies the default password.
 # - The login section below maps the user to the least-privilege ACL access
 #   group 'saadway' (files/rpc-acl.json → /usr/share/rpcd/acl.d/saadway.json).
-# - Until provisioning has created the user, session.login('saadway-admin', …)
-#   fails closed (getspnam lookup fails) — never fail open.
+# - Until provisioning has created the user, session.login('admin', …) fails
+#   closed (getspnam lookup fails) — never fail open.
 #
 # IMPORTANT: the heredoc is quoted ('EOF') so '$p$' reaches uci verbatim.
 
+# Create the login section only when it is missing — the ACL lists belong to
+# the creation (add_list appends, so re-adding them on an existing section
+# would duplicate the entries).
 if ! uci -q get rpcd.saadway_admin >/dev/null 2>&1; then
 	uci -q batch <<'EOF'
 add rpcd login
 rename rpcd.@login[-1]='saadway_admin'
-set rpcd.saadway_admin.username='saadway-admin'
-set rpcd.saadway_admin.password='$p$saadway-admin'
 add_list rpcd.saadway_admin.read='saadway'
 add_list rpcd.saadway_admin.write='saadway'
 EOF
 fi
+
+# ALWAYS refresh the credential mapping: an already-provisioned device still
+# carries the old 'saadway-admin' / '$p$saadway-admin' values and must be
+# migrated to the 'admin' login (T072).
+uci -q batch <<'EOF'
+set rpcd.saadway_admin.username='admin'
+set rpcd.saadway_admin.password='$p$admin'
+EOF
+
+# uci batch only writes the delta under /tmp/.uci (tmpfs) — without the
+# commit the login mapping (and the migration) is lost on the next reboot.
+uci -q commit rpcd
+
 exit 0

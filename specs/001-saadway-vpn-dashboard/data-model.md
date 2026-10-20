@@ -136,12 +136,15 @@ policy apply (User Story 6 scenario 4).
 Handling via uhttpd-mod-ubus ubus sessions (research D7; rpcd shadow bridge
 mechanics source-verified in docs/verify-2512.md §2):
 
-- Auth material: the dedicated dashboard user `saadway-admin` (nologin) is
-  provisioned over SSH by `/usr/libexec/saadway/provision`; its password
-  hash lives ONLY in `/etc/shadow` (0600), referenced from
-  `/etc/config/rpcd` as `option password '$p$saadway-admin'` — credential
-  material never sits in a world-readable UCI option (Constitution IV);
-  the daemon keeps no credential store of its own. Alternative mode:
+- Auth material: the dedicated dashboard user `admin` (nologin) is
+  provisioned over SSH by `/usr/libexec/saadway/provision`, which applies
+  the DEFAULT password `admin` non-interactively (plaintext over stdin,
+  hash only in `/etc/shadow`); its password hash lives ONLY in
+  `/etc/shadow` (0600), referenced from `/etc/config/rpcd` as
+  `option password '$p$admin'` — credential material never sits in a
+  world-readable UCI option (Constitution IV); the daemon keeps no
+  credential store of its own; the default is replaced with
+  `saadway-provision passwd`. Alternative mode:
   system-root auth — login as root (rpcd default login section); UCI
   `config dashboard/authentication = dedicated|system` records which
   credential set the administrator chose.
@@ -161,7 +164,7 @@ mechanics source-verified in docs/verify-2512.md §2):
 ```
 /etc/config/saadway                 ← sole persistent state (UCI)
 /etc/config/rpcd                    ← saadway_admin login section ('$p$' → /etc/shadow)
-/etc/shadow (saadway-admin)         ← 0600 hash, provisioned by /usr/libexec/saadway/provision
+/etc/shadow (admin)                 ← 0600 hash, provisioned by /usr/libexec/saadway/provision
 /etc/saadway/secrets/<profile>/     ← 0600 auth-user-pass / swanctl secrets
 /etc/saadway/run/openvpn/*.conf     ← rendered OpenVPN configs (0600)
 /etc/saadway/swanctl/*.conf         ← rendered swanctl configs (0600 secrets refs)
