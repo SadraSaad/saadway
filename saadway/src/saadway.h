@@ -209,6 +209,63 @@ struct sw_activate {
 	bool dreq_active;               /* deferred reply in flight      */
 };
 
+/* ------------------------------------------------------------------ */
+/* libubox compatibility helpers (T062)                                */
+/*                                                                     */
+/* libubox ships NEITHER blobmsg_add_bool() NOR blobmsg_find_name():   */
+/*  - a boolean is written as BLOBMSG_TYPE_BOOL over a 1-byte payload  */
+/*    (BLOBMSG_TYPE_BOOL == BLOBMSG_TYPE_INT8); libubox's JSON encoder */
+/*    (blobmsg_json.c) renders that type as true/false, so the boolean */
+/*    contract in contracts/api.md holds exactly;                       */
+/*  - a named field is found by walking blobmsg_for_each_attr and      */
+/*    comparing blobmsg_name().                                        */
+/*                                                                     */
+/* The optional type argument of blobmsg_find_name_typed() guards the  */
+/* handlers against type confusion: the ubus methods are registered     */
+/* without an upstream policy table (libubox's blobmsg_policy has no  */
+/* "optional field" notion, so a policy would reject the optional      */
+/* parameters the contract allows), so every value is type-checked     */
+/* here before it is read.                                              */
+/* ------------------------------------------------------------------ */
+
+static inline int blobmsg_add_bool(struct blob_buf *buf, const char *name,
+				   bool val)
+{
+	uint8_t v = val ? 1 : 0;
+
+	return blobmsg_add_field(buf, BLOBMSG_TYPE_BOOL, name, &v, 1);
+}
+
+static inline struct blob_attr *blobmsg_find_name(struct blob_attr *msg,
+						   const char *name)
+{
+	struct blob_attr *cur;
+	int rem;
+
+	if (!msg)
+		return NULL;
+
+	blobmsg_for_each_attr(cur, msg, rem) {
+		if (!strcmp(blobmsg_name(cur), name))
+			return cur;
+	}
+	return NULL;
+}
+
+/* type-checked lookup: NULL when absent OR of a different type */
+static inline struct blob_attr *blobmsg_find_name_typed(struct blob_attr *msg,
+							const char *name,
+							int type)
+{
+	struct blob_attr *a = blobmsg_find_name(msg, name);
+
+	if (!a)
+		return NULL;
+	if (type >= 0 && blobmsg_type(a) != type)
+		return NULL;
+	return a;
+}
+
 struct sw_failover {
 	bool cooldown_active;
 	long cooldown_deadline;         /* wall seconds */

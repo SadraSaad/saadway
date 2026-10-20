@@ -341,6 +341,40 @@ suite must be re-run against the **corrected** stub; the authoritative
   helpers) — same masking class as the `libuci.h` and
   `struct ubus_deferred_request` incidents; the pool must mirror
   upstream symbol-for-symbol from now on.
+* **Phase 16 / T062 applied.** The 16 two-argument `UBUS_METHOD(name,
+  handler)` entries are now the upstream policy-less
+  `UBUS_METHOD_NOARG(name, handler)` form (all 24 method names unchanged
+  and still matching `contracts/api.md`); libubox ships no boolean writer
+  and no named-field lookup, so `saadway/src/saadway.h` now provides
+  `blobmsg_add_bool()` (a 1-byte `BLOBMSG_TYPE_BOOL` write — upstream's
+  JSON encoder renders it `true`/`false`, so the api.md boolean contract
+  holds) and `blobmsg_find_name()` (a `blobmsg_for_each_attr` walk), plus
+  a type-checked `blobmsg_find_name_typed()`. Because the methods carry
+  no upstream policy table (libubox's `blobmsg_policy` has no
+  "optional field" notion, so a policy would reject the optional
+  parameters the contract allows), every value read is now type-checked
+  before it is interpreted — this closed a live type-confusion in
+  `mon.logs`, where the SPA sends `lines` as a number but the daemon read
+  it as a string; a new `arg_int()` helper accepts a JSON number
+  (`BLOBMSG_TYPE_INT32`) or a numeric string for the cursor/lines/
+  seconds/attempts arguments. The dev-only stub pool now mirrors
+  upstream: `libubox/blob.h` and `libubox/utils.h` were added (upstream
+  `ARRAY_SIZE` and `__packed` sources), `blobmsg.h` carries the upstream
+  type enum, `blobmsg_for_each_attr` macro and `blobmsg_add_field`, the
+  two fictional helpers are gone, and `libubus.h` now declares upstream's
+  three-argument `UBUS_METHOD` plus the real `UBUS_METHOD_NOARG` with an
+  upstream-shaped `struct ubus_method`. Host evidence: 13/13 modules
+  compile clean under `-Wall -Wextra` against the corrected stub; unit
+  suite 21/21; `make -C saadway/src -n` pipeline and link line unchanged;
+  all 24 method names verified against `contracts/api.md`; the SPA
+  payloads were checked against the new type guards (booleans arrive as
+  `BLOBMSG_TYPE_BOOL`, `lines`/`seconds`/`attempts` as `INT32`, `cursor`
+  as a numeric string). **Observed, not fixed (out of T062 scope):**
+  `uci-state.c:376` (`sw_util_normalize_name`) writes
+  `dst[o++] = (char)(o ? c : 'a')` — reading and modifying `o` in one
+  expression is undefined behaviour and trips `-Wsequence-point`; it needs
+  its own remediation task. The authoritative SDK build stays in the
+  T046/T057 on-device round.
 
 ## 9. Footprint pointers → T045
 

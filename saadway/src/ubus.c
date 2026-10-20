@@ -103,12 +103,34 @@ static void arg_missing(struct ubus_object *obj)
 	(void)obj;
 }
 
-static bool has_arg(struct blob_attr *msg, struct blob_attr **out,
-		    const char *name)
+/* numeric argument (T062): ubus delivers JSON numbers as
+ * BLOBMSG_TYPE_INT32, but a client may send a numeric string — accept
+ * both, and never read a value out of a wrong-typed attribute (the
+ * methods carry no upstream policy table, so ubus performs no type
+ * validation for us). */
+static bool arg_int(struct blob_attr *msg, const char *name, long *out)
 {
-	if (msg && (out[0] = blobmsg_find_name(msg, name)))
+	struct blob_attr *a = blobmsg_find_name_typed(msg, name,
+						      BLOBMSG_TYPE_INT32);
+	const char *s;
+	char *end = NULL;
+	long v;
+
+	if (a) {
+		*out = (long)blobmsg_get_u32(a);
 		return true;
-	return false;
+	}
+	a = blobmsg_find_name_typed(msg, name, BLOBMSG_TYPE_STRING);
+	if (!a)
+		return false;
+	s = blobmsg_get_string(a);
+	if (!s)
+		return false;
+	v = strtol(s, &end, 10);
+	if (!end || *end != '\0')
+		return false;
+	*out = v;
+	return true;
 }
 
 /* json string array → blobmsg string array (backup.import report) */
@@ -182,7 +204,8 @@ static int h_mgmt_set(struct ubus_context *ctx, struct ubus_object *obj,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &v, "enabled"))
+	v = blobmsg_find_name_typed(msg, "enabled", BLOBMSG_TYPE_BOOL);
+	if (!v)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	bool enabled = blobmsg_get_bool(v);
@@ -242,16 +265,20 @@ static int h_profile_import_openvpn(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &nv, "name") || !has_arg(msg, &ov, "ovpn_b64"))
+	if (!blobmsg_find_name_typed(msg, "name", BLOBMSG_TYPE_STRING) ||
+	    !blobmsg_find_name_typed(msg, "ovpn_b64", BLOBMSG_TYPE_STRING))
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	name = blobmsg_get_string(nv);
 	b64 = blobmsg_get_string(ov);
 	const char *user = NULL, *pass = NULL;
 
-	if (msg && (cv = blobmsg_find_name(msg, "credentials"))) {
-		struct blob_attr *u = blobmsg_find_name(cv, "username");
-		struct blob_attr *pw = blobmsg_find_name(cv, "password");
+	if (msg && (cv = blobmsg_find_name_typed(msg, "credentials",
+						 BLOBMSG_TYPE_TABLE))) {
+		struct blob_attr *u = blobmsg_find_name_typed(cv, "username",
+							     BLOBMSG_TYPE_STRING);
+		struct blob_attr *pw = blobmsg_find_name_typed(cv, "password",
+							      BLOBMSG_TYPE_STRING);
 
 		user = u ? blobmsg_get_string(u) : NULL;
 		pass = pw ? blobmsg_get_string(pw) : NULL;
@@ -306,8 +333,10 @@ static int h_profile_create_ikev2(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &nv, "name") || !has_arg(msg, &hv, "hostname") ||
-	    !has_arg(msg, &uv, "username") || !has_arg(msg, &pv, "password"))
+	if (!blobmsg_find_name_typed(msg, "name", BLOBMSG_TYPE_STRING) ||
+	    !blobmsg_find_name_typed(msg, "hostname", BLOBMSG_TYPE_STRING) ||
+	    !blobmsg_find_name_typed(msg, "username", BLOBMSG_TYPE_STRING) ||
+	    !blobmsg_find_name_typed(msg, "password", BLOBMSG_TYPE_STRING))
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX: name/hostname/username/"
 				   "password required");
@@ -315,11 +344,11 @@ static int h_profile_create_ikev2(struct ubus_context *ctx,
 	const char *host = blobmsg_get_string(hv);
 	const char *user = blobmsg_get_string(uv);
 	const char *pass = blobmsg_get_string(pv);
-	rv = msg ? blobmsg_find_name(msg, "remote_id") : NULL;
-	lv = msg ? blobmsg_find_name(msg, "local_id") : NULL;
-	cmv = msg ? blobmsg_find_name(msg, "cert_mode") : NULL;
-	piv = msg ? blobmsg_find_name(msg, "proposal_ike") : NULL;
-	pev = msg ? blobmsg_find_name(msg, "proposal_esp") : NULL;
+	rv = msg ? blobmsg_find_name_typed(msg, "remote_id", BLOBMSG_TYPE_STRING) : NULL;
+	lv = msg ? blobmsg_find_name_typed(msg, "local_id", BLOBMSG_TYPE_STRING) : NULL;
+	cmv = msg ? blobmsg_find_name_typed(msg, "cert_mode", BLOBMSG_TYPE_STRING) : NULL;
+	piv = msg ? blobmsg_find_name_typed(msg, "proposal_ike", BLOBMSG_TYPE_STRING) : NULL;
+	pev = msg ? blobmsg_find_name_typed(msg, "proposal_esp", BLOBMSG_TYPE_STRING) : NULL;
 	const char *rid = rv ? blobmsg_get_string(rv) : "same-as-hostname";
 	const char *lid = lv ? blobmsg_get_string(lv) : "same-as-username";
 	const char *cert = cmv ? blobmsg_get_string(cmv) : "from-server";
@@ -398,7 +427,9 @@ static int h_profile_update(struct ubus_context *ctx, struct ubus_object *obj,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &nv, "name") || !has_arg(msg, &pv, "patch"))
+		nv = blobmsg_find_name_typed(msg, "name", BLOBMSG_TYPE_STRING);
+	pv = blobmsg_find_name_typed(msg, "patch", BLOBMSG_TYPE_TABLE);
+	if (!nv || !pv)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	const char *name = blobmsg_get_string(nv);
@@ -410,9 +441,9 @@ static int h_profile_update(struct ubus_context *ctx, struct ubus_object *obj,
 	bool was_active = (c->active == p);
 	struct blob_attr *v;
 
-	if ((v = blobmsg_find_name(pv, "enabled")))
+	if ((v = blobmsg_find_name_typed(pv, "enabled", BLOBMSG_TYPE_BOOL)))
 		p->enabled = blobmsg_get_bool(v);
-	if ((v = blobmsg_find_name(pv, "hostname")) &&
+	if ((v = blobmsg_find_name_typed(pv, "hostname", BLOBMSG_TYPE_STRING)) &&
 	    p->kind == SW_KIND_IKEV2) {
 		const char *s = blobmsg_get_string(v);
 
@@ -421,19 +452,19 @@ static int h_profile_update(struct ubus_context *ctx, struct ubus_object *obj,
 					   "E_BAD_SYNTAX: hostname");
 		snprintf(p->hostname, sizeof(p->hostname), "%s", s);
 	}
-	if ((v = blobmsg_find_name(pv, "username")) &&
+	if ((v = blobmsg_find_name_typed(pv, "username", BLOBMSG_TYPE_STRING)) &&
 	    p->kind == SW_KIND_IKEV2)
 		snprintf(p->username, sizeof(p->username), "%s",
 			 blobmsg_get_string(v));
-	if ((v = blobmsg_find_name(pv, "remote_id")) &&
+	if ((v = blobmsg_find_name_typed(pv, "remote_id", BLOBMSG_TYPE_STRING)) &&
 	    p->kind == SW_KIND_IKEV2)
 		snprintf(p->remote_id, sizeof(p->remote_id), "%s",
 			 blobmsg_get_string(v));
-	if ((v = blobmsg_find_name(pv, "local_id")) &&
+	if ((v = blobmsg_find_name_typed(pv, "local_id", BLOBMSG_TYPE_STRING)) &&
 	    p->kind == SW_KIND_IKEV2)
 		snprintf(p->local_id, sizeof(p->local_id), "%s",
 			 blobmsg_get_string(v));
-	if ((v = blobmsg_find_name(pv, "cert_mode")) &&
+	if ((v = blobmsg_find_name_typed(pv, "cert_mode", BLOBMSG_TYPE_STRING)) &&
 	    p->kind == SW_KIND_IKEV2) {
 		const char *s = blobmsg_get_string(v);
 
@@ -442,7 +473,7 @@ static int h_profile_update(struct ubus_context *ctx, struct ubus_object *obj,
 					   "E_BAD_SYNTAX: cert_mode");
 		snprintf(p->cert_mode, sizeof(p->cert_mode), "%s", s);
 	}
-	if ((v = blobmsg_find_name(pv, "proposal_ike")) &&
+	if ((v = blobmsg_find_name_typed(pv, "proposal_ike", BLOBMSG_TYPE_STRING)) &&
 	    p->kind == SW_KIND_IKEV2) {
 		const char *s = blobmsg_get_string(v);
 
@@ -451,7 +482,7 @@ static int h_profile_update(struct ubus_context *ctx, struct ubus_object *obj,
 					   "E_BAD_SYNTAX: proposal_ike");
 		snprintf(p->proposal_ike, sizeof(p->proposal_ike), "%s", s);
 	}
-	if ((v = blobmsg_find_name(pv, "proposal_esp")) &&
+	if ((v = blobmsg_find_name_typed(pv, "proposal_esp", BLOBMSG_TYPE_STRING)) &&
 	    p->kind == SW_KIND_IKEV2) {
 		const char *s = blobmsg_get_string(v);
 
@@ -461,7 +492,7 @@ static int h_profile_update(struct ubus_context *ctx, struct ubus_object *obj,
 		snprintf(p->proposal_esp, sizeof(p->proposal_esp), "%s", s);
 	}
 	/* secrets replaced, never echoed (FR-021) */
-	if ((v = blobmsg_find_name(pv, "password"))) {
+	if ((v = blobmsg_find_name_typed(pv, "password", BLOBMSG_TYPE_STRING))) {
 		const char *s = blobmsg_get_string(v);
 
 		if (p->kind == SW_KIND_IKEV2 &&
@@ -469,7 +500,7 @@ static int h_profile_update(struct ubus_context *ctx, struct ubus_object *obj,
 			return reply_error(ctx, req, UBUS_STATUS_UNKNOWN_ERROR,
 					   "E_SECRET_WRITE_FAILED");
 		if (p->kind == SW_KIND_OPENVPN) {
-			struct blob_attr *u = blobmsg_find_name(pv, "username");
+			struct blob_attr *u = blobmsg_find_name_typed(pv, "username", BLOBMSG_TYPE_STRING);
 			const char *uu = u ? blobmsg_get_string(u) : NULL;
 			char auth[640];
 
@@ -517,7 +548,8 @@ static int h_profile_delete(struct ubus_context *ctx, struct ubus_object *obj,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &nv, "name"))
+		nv = blobmsg_find_name_typed(msg, "name", BLOBMSG_TYPE_STRING);
+	if (!nv)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	const char *name = blobmsg_get_string(nv);
@@ -526,7 +558,7 @@ static int h_profile_delete(struct ubus_context *ctx, struct ubus_object *obj,
 	if (!p)
 		return reply_error(ctx, req, UBUS_STATUS_NOT_FOUND,
 				   "unknown profile");
-	fv = msg ? blobmsg_find_name(msg, "force") : NULL;
+	fv = msg ? blobmsg_find_name_typed(msg, "force", BLOBMSG_TYPE_BOOL) : NULL;
 	if (c->active == p && !(fv && blobmsg_get_bool(fv)))
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_ACTIVE: force=true required");
@@ -568,7 +600,8 @@ static int h_profile_activate(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &nv, "name"))
+		nv = blobmsg_find_name_typed(msg, "name", BLOBMSG_TYPE_STRING);
+	if (!nv)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	struct sw_profile *p = sw_uci_profile_find(c, blobmsg_get_string(nv));
@@ -652,7 +685,8 @@ static int h_steer_domain_add(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &v, "domain"))
+		v = blobmsg_find_name_typed(msg, "domain", BLOBMSG_TYPE_STRING);
+	if (!v)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	const char *domain = blobmsg_get_string(v);
@@ -688,7 +722,8 @@ static int h_steer_domain_remove(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &v, "domain"))
+		v = blobmsg_find_name_typed(msg, "domain", BLOBMSG_TYPE_STRING);
+	if (!v)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	sw_uci_domain_remove(c, blobmsg_get_string(v));
@@ -711,13 +746,14 @@ static int h_steer_device_set(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &mv, "match_type") || !has_arg(msg, &vv,
-							 "match_value"))
+	mv = blobmsg_find_name_typed(msg, "match_type", BLOBMSG_TYPE_STRING);
+	vv = blobmsg_find_name_typed(msg, "match_value", BLOBMSG_TYPE_STRING);
+	if (!mv || !vv)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	const char *mt = blobmsg_get_string(mv);
 	const char *val = blobmsg_get_string(vv);
-	pv = msg ? blobmsg_find_name(msg, "policy") : NULL;
+	pv = msg ? blobmsg_find_name_typed(msg, "policy", BLOBMSG_TYPE_STRING) : NULL;
 	const char *pol = pv ? blobmsg_get_string(pv) : "tunneled";
 	bool is_ip = !strcmp(mt, "ip");
 
@@ -750,8 +786,9 @@ static int h_steer_device_remove(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &mv, "match_type") || !has_arg(msg, &vv,
-							 "match_value"))
+	mv = blobmsg_find_name_typed(msg, "match_type", BLOBMSG_TYPE_STRING);
+	vv = blobmsg_find_name_typed(msg, "match_value", BLOBMSG_TYPE_STRING);
+	if (!mv || !vv)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	const char *mt = blobmsg_get_string(mv);
@@ -781,7 +818,8 @@ static int h_steer_iprange_set(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &v, "enabled"))
+		v = blobmsg_find_name_typed(msg, "enabled", BLOBMSG_TYPE_BOOL);
+	if (!v)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	c->st.iprange_bypass = blobmsg_get_bool(v);
@@ -834,7 +872,8 @@ static int h_sec_kill_switch_set(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &v, "enabled"))
+		v = blobmsg_find_name_typed(msg, "enabled", BLOBMSG_TYPE_BOOL);
+	if (!v)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	c->st.kill_switch = blobmsg_get_bool(v);   /* persisted (FR-012) */
@@ -975,12 +1014,13 @@ static int h_mon_logs(struct ubus_context *ctx, struct ubus_object *obj,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	cv = msg ? blobmsg_find_name(msg, "cursor") : NULL;
-	lv = msg ? blobmsg_find_name(msg, "lines") : NULL;
-	if (cv)
-		cursor = strtol(blobmsg_get_string(cv), NULL, 10);
-	if (lv)
-		max = (int)blobmsg_get_u32(lv);
+	{
+		long lmax = 0;
+
+		arg_int(msg, "cursor", &cursor);
+		if (arg_int(msg, "lines", &lmax))
+			max = (int)lmax;
+	}
 	if (max <= 0)
 		max = 20;
 	if (max > 64)
@@ -1015,9 +1055,9 @@ static int h_maint_backup_export(struct ubus_context *ctx,
 				 const char *method, struct blob_attr *msg)
 {
 	struct sw_ctx *c = global_ctx;
-	struct blob_attr *icv = msg ? blobmsg_find_name(msg,
-						      "include_credentials") :
-				      NULL;
+	struct blob_attr *icv = msg ? blobmsg_find_name_typed(msg,
+						"include_credentials",
+						BLOBMSG_TYPE_BOOL) : NULL;
 	bool incl = icv ? blobmsg_get_bool(icv) : false;
 	char *json = NULL;
 
@@ -1057,7 +1097,8 @@ static int h_maint_backup_import(struct ubus_context *ctx,
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &jv, "json_b64"))
+		jv = blobmsg_find_name_typed(msg, "json_b64", BLOBMSG_TYPE_STRING);
+	if (!jv)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
 	unsigned char *json = NULL;
@@ -1111,34 +1152,26 @@ static int h_maint_backup_import(struct ubus_context *ctx,
 	return UBUS_STATUS_OK;
 }
 
-static int parse_i(struct blob_attr *v, int def)
-{
-	if (!v)
-		return def;
-	return (int)blobmsg_get_u32(v);
-}
-
 static int h_maint_cooldown_set(struct ubus_context *ctx,
 				struct ubus_object *obj,
 				struct ubus_request_data *req,
 				const char *method, struct blob_attr *msg)
 {
 	struct sw_ctx *c = global_ctx;
-	struct blob_attr *sv, *av;
+	long sec = 0, att = 0;
 
 	(void)obj;
 	(void)method;
 	arg_missing(obj);
-	if (!has_arg(msg, &sv, "seconds"))
+	if (!arg_int(msg, "seconds", &sec))
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX");
-	int sec = parse_i(sv, 0);
 
 	if (sec < 30 || sec > 86400)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_BAD_SYNTAX: seconds (30..86400)");
-	av = msg ? blobmsg_find_name(msg, "attempts") : NULL;
-	int att = parse_i(av, c->st.failover_attempts);
+	if (!arg_int(msg, "attempts", &att))
+		att = c->st.failover_attempts;
 
 	if (att < 1 || att > 10)
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
@@ -1159,29 +1192,29 @@ static int h_maint_cooldown_set(struct ubus_context *ctx,
 
 static struct ubus_method saadway_methods[] = {
 	UBUS_METHOD_NOARG("mgmt.status",        h_mgmt_status),
-	UBUS_METHOD("mgmt.set",                 h_mgmt_set),
+	UBUS_METHOD_NOARG("mgmt.set",                 h_mgmt_set),
 	UBUS_METHOD_NOARG("profile.list",       h_profile_list),
-	UBUS_METHOD("profile.import_openvpn",    h_profile_import_openvpn),
-	UBUS_METHOD("profile.create_ikev2",      h_profile_create_ikev2),
-	UBUS_METHOD("profile.update",           h_profile_update),
-	UBUS_METHOD("profile.delete",           h_profile_delete),
-	UBUS_METHOD("profile.activate",         h_profile_activate),
+	UBUS_METHOD_NOARG("profile.import_openvpn",    h_profile_import_openvpn),
+	UBUS_METHOD_NOARG("profile.create_ikev2",      h_profile_create_ikev2),
+	UBUS_METHOD_NOARG("profile.update",           h_profile_update),
+	UBUS_METHOD_NOARG("profile.delete",           h_profile_delete),
+	UBUS_METHOD_NOARG("profile.activate",         h_profile_activate),
 	UBUS_METHOD_NOARG("profile.deactivate",  h_profile_deactivate),
 	UBUS_METHOD_NOARG("steer.list",         h_steer_list),
-	UBUS_METHOD("steer.domain.add",         h_steer_domain_add),
-	UBUS_METHOD("steer.domain.remove",      h_steer_domain_remove),
-	UBUS_METHOD("steer.device.set",         h_steer_device_set),
-	UBUS_METHOD("steer.device.remove",      h_steer_device_remove),
-	UBUS_METHOD("steer.iprange.set",        h_steer_iprange_set),
+	UBUS_METHOD_NOARG("steer.domain.add",         h_steer_domain_add),
+	UBUS_METHOD_NOARG("steer.domain.remove",      h_steer_domain_remove),
+	UBUS_METHOD_NOARG("steer.device.set",         h_steer_device_set),
+	UBUS_METHOD_NOARG("steer.device.remove",      h_steer_device_remove),
+	UBUS_METHOD_NOARG("steer.iprange.set",        h_steer_iprange_set),
 	UBUS_METHOD_NOARG("sec.status",         h_sec_status),
-	UBUS_METHOD("sec.kill_switch.set",      h_sec_kill_switch_set),
+	UBUS_METHOD_NOARG("sec.kill_switch.set",      h_sec_kill_switch_set),
 	UBUS_METHOD_NOARG("sec.dns.status",     h_sec_dns_status),
 	UBUS_METHOD_NOARG("mon.health_test",    h_mon_health_test),
 	UBUS_METHOD_NOARG("mon.stats",          h_mon_stats),
-	UBUS_METHOD("mon.logs",                 h_mon_logs),
-	UBUS_METHOD("maint.backup.export",      h_maint_backup_export),
-	UBUS_METHOD("maint.backup.import",      h_maint_backup_import),
-	UBUS_METHOD("maint.cooldown.set",       h_maint_cooldown_set),
+	UBUS_METHOD_NOARG("mon.logs",                 h_mon_logs),
+	UBUS_METHOD_NOARG("maint.backup.export",      h_maint_backup_export),
+	UBUS_METHOD_NOARG("maint.backup.import",      h_maint_backup_import),
+	UBUS_METHOD_NOARG("maint.cooldown.set",       h_maint_cooldown_set),
 };
 
 static struct ubus_object_type saadway_type =
