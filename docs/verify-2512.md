@@ -289,6 +289,15 @@ stub signatures, and this checklist item re-confirms the REAL
   objects, and stock rpcd.config grants the root login `list read/write
   '*'`, so this group attaches to LuCI root sessions with zero rpcd config
   changes (§10 record).
+* T055 link/dependency parity audit (Phase 12): `Build/Compile` links
+  `-lubus -lubox -luci -ljson-c` — each with a staging `DEPENDS`
+  counterpart (`+libubus +libubox +libuci +libjson-c`, each exactly
+  once); `-lmbedtls -lmbedcrypto -lcrypt` dropped from the link line
+  (zero daemon consumers after the T049 auth-module deletion —
+  `grep -rn 'crypt(' src/*.c` empty). Flags hoisted to `SAADWAY_CFLAGS`
+  (`$(TARGET_CFLAGS) -std=c11 -Os -I$(PKG_BUILD_DIR)`); `_GNU_SOURCE`
+  intentionally omitted (every module defines it in-source). The host
+  unit suite keeps its dev-only `-lcrypt` link flag (never shipped).
 
 ---
 
@@ -368,6 +377,29 @@ this phase; each traces to the appended tasks.md lines.
   shadow bridge. On-device T046 adds one assertion: with
   `dashboard.session_timeout='600'`, a dashboard idle-out beyond ~10 min
   requires re-login (Scenario 4 step 3 wording).
+* **Phase 12 — cross-compile & packaging remediation (T054–T057).** The
+  25.12 SDK build attempt exposed two real defects: (a) `Build/Prepare`
+  copied `./src/*` — dragging `src/unit/` (host test Makefile, shims,
+  test sources, and the previously committed ELF test binaries) into
+  `PKG_BUILD_DIR`; (b) the link line still carried
+  `-lmbedtls -lmbedcrypto -lcrypt` although T049 removed `libmbedtls`
+  from `DEPENDS` (nothing stages it → clean-SDK link error), with zero
+  remaining `crypt()` consumers after the auth-module deletion. Fixes:
+  prepare copies `./src/*.c ./src/*.h` only; flags/libs hoisted into
+  `SAADWAY_CFLAGS` / `SAADWAY_LIBS` (link order: objects,
+  `$(TARGET_LDFLAGS)`, `-lubus -lubox -luci -ljson-c`); stray
+  `saadway/src/*.o` deleted; the four committed unit-test ELF binaries
+  `git rm --cached`; `.gitignore` refined (`*.o`, `*.a`,
+  `saadway/src/unit/test_[a-z]*` with `!saadway/src/unit/test_*.c`
+  negation so test sources stay tracked). Host-side integrity evidence:
+  all 13 modules object-compile through the separated flag line with the
+  dev stub headers; prepare-exclusion proof (copy contains zero `unit`
+  entries); `git check-ignore` semantics verified (binaries ignored,
+  `.c` sources untouched). **T057 remains device-bound**:
+  `tests/smoke-container.sh` is the Gate-3 on-device gate (its header:
+  real 25.12 device, nft+ubus, active tunnel; the build host has no
+  container runtime) — its execution folds into the T046 round and must
+  PASS there after these packaging fixes.
 
 ---
 

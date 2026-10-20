@@ -1,4 +1,9 @@
+# build artifacts (T056): objects, archives, and the unit-suite test
+# binaries are never tracked — test SOURCES stay tracked
 *.o
-unit/test_*
+*.a
+saadway/src/unit/test_[a-z]*
+!saadway/src/unit/test_*.c
+# local tooling state
 .opencode
 .specify

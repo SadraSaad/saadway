@@ -60,24 +60,35 @@ endef
 
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
-	$(CP) ./src/* $(PKG_BUILD_DIR)/
-endef
-
-define Build/Compile
-	$(TARGET_CC) $(TARGET_CFLAGS) -std=c11 -D_GNU_SOURCE -Os \
-		$(TARGET_LDFLAGS) \
-		-o $(PKG_BUILD_DIR)/saadwayd \
-		$(SAADWAY_OBJECTS) \
-		-lubus -lubox -luci -ljson-c -lmbedtls -lmbedcrypto -lcrypt
+	# T054: daemon sources/headers only — src/unit/ (host test Makefile,
+	# shims, test sources, host ELF binaries) must never enter
+	# PKG_BUILD_DIR (constitution Gate 2 footprint)
+	$(CP) ./src/*.c ./src/*.h $(PKG_BUILD_DIR)/
 endef
 
 SAADWAY_MODULES:= main uci-state log ubus policy tunnel-openvpn \
 	tunnel-ikev2 failover steering dns health counters backup
 SAADWAY_OBJECTS:=$(patsubst %,$(PKG_BUILD_DIR)/%.o,$(SAADWAY_MODULES))
 
+# T054: flags / sources / libs strictly separated; only libraries staged by
+# DEPENDS are linked (T049 removed libmbedtls from DEPENDS — the daemon has
+# no mbedtls consumer, so the stale -lmbedtls -lmbedcrypto broke clean-SDK
+# link builds). LDFLAGS come after the object list, libs last. _GNU_SOURCE
+# is intentionally NOT here: every module defines it in-source (a -D flag
+# emits 13 redefinition warnings per build).
+SAADWAY_CFLAGS:=$(TARGET_CFLAGS) -std=c11 -Os -I$(PKG_BUILD_DIR)
+SAADWAY_LIBS:=-lubus -lubox -luci -ljson-c
+
 $(PKG_BUILD_DIR)/%.o: $(PKG_BUILD_DIR)/%.c $(PKG_BUILD_DIR)/saadway.h
-	$(TARGET_CC) $(TARGET_CFLAGS) -std=c11 -D_GNU_SOURCE -Os \
-		-I$(PKG_BUILD_DIR) -c -o $@ $<
+	$(TARGET_CC) $(SAADWAY_CFLAGS) -c -o $@ $<
+
+define Build/Compile
+	$(TARGET_CC) \
+		-o $(PKG_BUILD_DIR)/saadwayd \
+		$(SAADWAY_OBJECTS) \
+		$(TARGET_LDFLAGS) \
+		$(SAADWAY_LIBS)
+endef
 
 define Package/saadway/install
 	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/config $(1)/etc/init.d \

@@ -203,6 +203,8 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **US5 (Phase 7)**: depends on an activatable tunnel (US1) for meaningful interface-bound monitoring
 - **US6 (Phase 8)**: depends on profile state (US1) and policy/nft rendering (US2/US3) for round-trip fidelity
 - **Polish (Phase 9)**: depends on all desired stories complete
+- **Convergence (Phases 10–11)**: appended after implementation; T047–T053 carry the code/contract fixes derived from the converge audits (T047 dnsmasq-full, T048 LuCI ACL, T049 auth reconciliation incl. `libmbedtls` removal, T050 D2 ratification, T051 i18n, T052 record, T053 session_timeout)
+- **Remediation (Phase 12)**: depends on the Phase 1–11 code state — specifically on T049's `libmbedtls` DEPENDS removal whose stale link-line echo is what T054 repairs; T057 validates the packaged tree once T054–T056 land
 
 ### User Story Dependencies
 
@@ -223,6 +225,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - Phase 2 [P] tasks (T005–T010) in parallel after T004
 - Across stories: US2/US3/US4 task groups are file-disjoint and can proceed in parallel by different developers after Phase 2
 - Story-local [P] tasks as marked (e.g. T012/T013 both tunnel backends concurrently)
+- Phase 12: T056 (worktree/`.gitignore` cleanup) is parallel-safe; T055 review can overlap T056 but NOT T054 (same `saadway/Makefile` file); T057 runs last, after T054–T056
 
 ---
 
@@ -267,3 +270,21 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 ## Phase 11: Convergence
 
 - [X] T053: Make `dashboard.session_timeout` runtime-effective (FR-020 expiry): add `session_timeout` to the `mgmt.status` reply (`ubus.c:h_mgmt_status` returns the loaded `c->st.session_timeout` — already loaded/clamped ≥300 s at uci-state.c:855); extend the `contracts/api.md` `mgmt.status` field list verbatim; update `htdocs/…/api.js` to fetch it from `mgmt.status` (keep `SESSION_TIMEOUT=1800` only as the fallback for the pre-first-call login path) and use the returned value at `session.login` — `files/saadway.conf`, `contracts/uci.md` and quickstart prose stay unchanged per data-model.md §DashboardSession (partial)
+
+## Phase 12: OpenWrt 25.12 Cross-Compilation and Packaging Fixes
+
+**Purpose**: Remediation (user-directed) — repair the real-SDK cross-compile
+link failure and packaging-tree pollution before the T046 on-device round.
+Found during a 25.12 SDK build attempt: `Build/Prepare` drags `src/unit/`
+(host test Makefile, shims, ELF test binaries) into `PKG_BUILD_DIR`, and
+`Build/Compile` still links `-lmbedtls -lmbedcrypto` although the T049
+dependency cleanup removed `libmbedtls` from `DEPENDS` (nothing stages it →
+undefined-library link error), with flags/sources/libs interleaved in one
+command.
+
+- [X] T054 Fix `saadway/Makefile` linking error by explicitly excluding `src/unit/` and separating C sources from flags (missing) per T002 packaging task + Constitution II footprint — in `Build/Prepare`, copy only the daemon sources and headers (`./src/*.c` + `./src/*.h`) instead of `./src/*`, so `src/unit/` (unit-test Makefile, `test-stubs.c`, `shim_uci.c`, test sources, host-only ELF binaries) can never enter `PKG_BUILD_DIR`; in `Build/Compile`, hoist flags into named variables (e.g. `SAADWAY_CFLAGS := $(TARGET_CFLAGS) -std=c11 -D_GNU_SOURCE -Os -I$(PKG_BUILD_DIR)`), keep the object list strictly the 13 `SAADWAY_MODULES`, and link only libraries actually staged by DEPENDS — drop the dead `-lmbedtls -lmbedcrypto` (T049 removed `libmbedtls` from DEPENDS; the daemon has no mbedtls consumer since the Phase-10 T049 auth-module deletion), keep `-lubus -lubox -luci -ljson-c -lcrypt`, and place `$(TARGET_LDFLAGS)` after the object list; keep the shared pattern rule `$(PKG_BUILD_DIR)/%.o: %.c + saadway.h` using the same `SAADWAY_CFLAGS` (depends on nothing)
+- [X] T055 [P] Verify `saadway` dependencies in `saadway/Makefile` (`libubus`, `libubox`, `libuci`) (partial) per T002 + plan.md Primary Dependencies — confirm `DEPENDS` carries `+libubus +libubox +libuci` (plus `libblobmsg-json`) exactly once each, that every `-l<name>` on the `Build/Compile` link line has a staging `DEPENDS` counterpart, and record the audit result in `docs/verify-2512.md` §9 (review after T054's link-line rework; same file — coordinate, do not run concurrently with T054)
+- [X] T056 [P] Clean up residual object files (`*.o`) from `saadway/src/` and update `.gitignore` (partial) per T045 audit / Constitution II — delete stray `saadway/src/*.o` from the worktree, `git rm --cached` the unit-test ELF binaries that were committed before `.gitignore` existed (tracked files ignore `.gitignore`), and refine `.gitignore` so build artifacts (`*.o`, `*.a`, unit test binaries) stay ignored while test sources remain tracked (add the `!saadway/src/unit/test_*.c` negation — the current broad `unit/test_*` pattern shadows `test_*.c`); end state: `git status` clean of artifacts, `git ls-files` contains no ELF or `*.o` (parallel-safe — touches no Makefile)
+- [ ] T057 Run `tests/smoke-container.sh` to ensure package integrity (missing) per Gate 3 + quickstart Scenario 5.2 — execute the smoke test after T054–T056 against the rebuilt/cleaned package tree, expect PASS (no unit/ pollution in the package, link succeeds, budget behavior intact); record the outcome in `docs/verify-2512.md` §10 (depends on T054, T055, T056; on-device hardware checks remain in T046) — EXECUTION NOTE (2026-10-20): device-bound, left unexecuted on the build host (script requires nft+ubus+an active tunnel on real OpenWrt; no container runtime available); host-side package-integrity proxies executed instead — Build/Prepare exclusion proof (zero `unit` entries in the staged copy) + all 13 modules object-compiled via the separated `SAADWAY_CFLAGS` (13/13 OK); run the literal script during the T046 device round
+
+**Checkpoint**: a clean-SDK `make package/saadway/{clean,compile}` links and stages without any `src/unit/` residue; the repo carries no build outputs; `tests/smoke-container.sh` passes.
