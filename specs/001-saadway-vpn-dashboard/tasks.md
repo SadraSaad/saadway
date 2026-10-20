@@ -211,6 +211,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation round 5 (Phase 16)**: depends on the Phase 15 libubus alignment (T061) — T062 aligns the remaining libubus/libubox API surface (`UBUS_METHOD` arity, the two non-existent blobmsg helpers) in `ubus.c`, adds the local helpers to `saadway.h`, and purges the fictional declarations from the dev stub pool; sequential (helpers → method table → call sites → stub), SDK build proof folds into the T046/T057 round
 - **Remediation round 6 (Phase 17)**: depends on the Phase 16 compile surface (T062) — T063 closes the last link gap (the `global_ctx` definition) and adds the reusable host-side link-surface audit that would have caught it; sequential (definition → audit script), SDK link proof folds into the T046/T057 round
 - **Remediation round 7 (Phase 18)**: independent of the C-code phases (the daemon already packages) — T064 converts the LuCI app into a standalone SDK-buildable package and adds the missing LuCI menu entry; sequential (Makefile → menu asset → asset audit), SDK app-build proof folds into the T046/T057 round
+- **Remediation round 8 (Phase 19)**: depends on Phase 18 (T064) — T065 repairs the package METADATA that T064 placed in the wrong evaluation scope (version fields must be top-level so `Package/Default` can derive `VERSION`) and adds the empty build blocks a file-only package needs; the asset set from T064 is unchanged, SDK app-build proof folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -480,3 +481,42 @@ handle.
   - Verification per docs/verify-2512.md: (i) the Makefile includes `$(INCLUDE_DIR)/package.mk` and evaluates `BuildPackage` — no `feeds/luci` reference remains (grep); (ii) every file the install rules reference exists in the package tree (extend the §9 install-asset audit with the LuCI app's three assets); (iii) the app must still be architecture-independent (`PKGARCH:=all`) and must not ship a compiled binary; (iv) the authoritative proof — `make package/luci-app-saadway/compile` in the SDK layout that produced `saadway-1.0.0-r1.apk` — is folded into the T046/T057 round, together with the check that the page appears under Administration → SaadWay and that its two `saadway.mgmt.*` calls are authorized by the shipped ACL group.
 
 **Checkpoint**: `package/luci-app-saadway/compile` exists in an SDK-only tree; the app installs the view, its ACL and its menu entry; the LuCI surface is reachable and remains limited to status + toggle + link.
+
+## Phase 19: Remediation Round 8 — luci-app-saadway Package Metadata
+
+**Purpose**: The SDK still rejects the LuCI package:
+`Makefile:63: *** Package/luci-app-saadway is missing the VERSION field.
+Stop.` → `ERROR: package/luci-app-saadway failed to build.`
+
+**Root cause (verified against openwrt@main):**
+- `include/package-defaults.mk` → `Package/Default` derives the package
+  version: `VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)` (or `$(PKG_VERSION)`,
+  or `$(PKG_RELEASE)` when `PKG_VERSION` is empty).
+- `include/package.mk` → `BuildPackage` evaluates `$(eval
+  $(Package/Default))` **before** `$(eval $(Package/$(1)))`, and the
+  mandatory-field check then reads the package-scoped `VERSION`
+  (`$(foreach FIELD, TITLE CATEGORY SECTION VERSION, …)` → *"Package/…
+  is missing the VERSION field"*).
+- Therefore `PKG_VERSION`/`PKG_RELEASE` must be set at the **top level**
+  of the package Makefile, before the `BuildPackage` evaluation. T064 set
+  them **inside** `define Package/luci-app-saadway` — too late:
+  `Package/Default` had already run with an empty `PKG_VERSION`, so
+  `VERSION` stayed empty and the check fired.
+- The in-repo precedent is our own core package: `saadway/Makefile:17-19`
+  declares `PKG_NAME`/`PKG_VERSION:=1.0.0`/`PKG_RELEASE:=1` at the top
+  level — which is exactly why the daemon packaged as
+  `saadway-1.0.0-r1.apk`. The LuCI app must mirror that pattern.
+- A second latent failure sits behind the first: the default
+  `Build/Compile` runs `$(MAKE) -C $(PKG_BUILD_DIR)`, where this package
+  has **no Makefile** (it ships files only) → *"no targets specified and
+  no makefile found"*; the default `Build/Configure` would look for a
+  `./configure` script that does not exist. Both must be empty blocks.
+
+- [ ] T065: Explicitly define VERSION in Package/luci-app-saadway and ensure valid package structure (missing) per Constitution I (Native Platform Compliance — the package must satisfy the standard OpenWrt 25.12 build system's metadata contract) and Gate 2 (footprint — still `PKGARCH:=all`, no new runtime), with docs/verify-2512.md §9 (install-asset audit) + §10 (build-time record) — target file: `luci-app-saadway/Makefile`:
+  - Move the version metadata to the TOP LEVEL of the Makefile, before `include $(INCLUDE_DIR)/package.mk`, exactly as the core package does: `PKG_NAME:=luci-app-saadway`, `PKG_VERSION:=1.0.0`, `PKG_RELEASE:=1` (remove the in-define copies — they are evaluated too late to feed `Package/Default`).
+  - Inside `define Package/luci-app-saadway`, declare the field explicitly: `VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)` — upstream's own format (the `r` matches the daemon's `saadway-1.0.0-r1.apk` naming; the check itself only requires a non-empty `VERSION`). Keep `SECTION`, `CATEGORY`, `TITLE`, `DEPENDS:=+saadway`, `PKGARCH:=all`, `MAINTAINER` and `PKG_LICENSE` as they are.
+  - Add the two empty build blocks the file-only package needs, so the defaults never run: `define Build/Configure` / `endef` and `define Build/Compile` / `endef`.
+  - Leave the install rules, the view, the session ACL and the menu entry untouched — the T064 asset set is correct and only the package metadata was wrong.
+  - Verification per docs/verify-2512.md: (i) a host-side metadata audit that emulates the upstream rules — `Package/Default`'s `VERSION` inheritance, the mandatory-field check and the "no Makefile in the build dir" compile behaviour — applied to BOTH package Makefiles (the check must fail on the current LuCI Makefile and pass after the fix, proving it has teeth); ship it as `tests/pkg-metadata-audit.sh` next to the existing `tests/link-audit.sh`; (ii) strict greps: `PKG_VERSION`/`PKG_RELEASE` present at the top level, `VERSION` present inside the package define, `Build/Configure` and `Build/Compile` defined as empty blocks; (iii) the authoritative proof — `make package/luci-app-saadway/compile` in the SDK that produced `saadway-1.0.0-r1.apk` — must yield `luci-app-saadway-1.0.0-r1.apk`, folded into the T046/T057 on-device round.
+
+**Checkpoint**: the LuCI package satisfies the build system's metadata contract (top-level version, explicit `VERSION`, empty build blocks); the metadata audit is green for both packages; the SDK produces the app package.

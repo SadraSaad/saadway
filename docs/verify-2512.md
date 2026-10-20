@@ -457,6 +457,24 @@ suite must be re-run against the **corrected** stub; the authoritative
   produced `saadway-1.0.0-r1.apk`, plus the on-device check that the
   page appears and its two `saadway.mgmt.*` calls are authorized, stay
   in the T046/T057 round.
+* **Package metadata contract (upstream facts for Phase 19 / T065).**
+  `include/package-defaults.mk` → `Package/Default` derives the version
+  as `VERSION:=$(PKG_VERSION)-r$(PKG_RELEASE)` (falling back to
+  `$(PKG_VERSION)` or `$(PKG_RELEASE)`), and `include/package.mk` →
+  `BuildPackage` evaluates `$(eval $(Package/Default))` **before**
+  `$(eval $(Package/$(1)))`; the mandatory-field check then reads the
+  package-scoped `VERSION` and aborts with "Package/… is missing the
+  VERSION field". Consequence: `PKG_VERSION`/`PKG_RELEASE` must be
+  declared at the TOP LEVEL of the package Makefile — setting them inside
+  the package define is too late, because `Package/Default` has already
+  run with an empty `PKG_VERSION` (this is exactly what T064 did, and
+  the SDK rejected it). Our own core package gets this right
+  (`saadway/Makefile:17-19` → `saadway-1.0.0-r1.apk`), so the LuCI app
+  must mirror that pattern. Second, a file-only package must define
+  `Build/Configure` and `Build/Compile` as EMPTY blocks: the default
+  `Build/Compile` runs `$(MAKE) -C $(PKG_BUILD_DIR)` where no Makefile
+  exists, and the default `Build/Configure` looks for a `./configure`
+  script that does not exist.
 
 ## 9. Footprint pointers → T045
 
