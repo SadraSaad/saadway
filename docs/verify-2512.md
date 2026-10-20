@@ -429,6 +429,34 @@ suite must be re-run against the **corrected** stub; the authoritative
   "Administration → SaadWay" entry (FR-022, quickstart Scenario 4) could
   not appear; the standalone rewrite adds it in the same `root/` tree,
   gated by the same ACL group the app already installs.
+* **Phase 18 / T064 applied.** `luci-app-saadway/Makefile` is now a
+  standalone package: `include $(INCLUDE_DIR)/package.mk` + an explicit
+  `Package/luci-app-saadway` block (SECTION/CATEGORY/TITLE/DEPENDS
+  `+saadway`/`PKGARCH:=all`/the mandatory `PKG_VERSION:=1.0.0` +
+  `PKG_RELEASE:=1`/MAINTAINER/PKG_LICENSE) ending in
+  `$(eval $(call BuildPackage,luci-app-saadway))` — no luci-feed
+  include remains (a strict `feeds/luci` grep is clean). The install
+  rules place the view under `/www/luci-static/resources/view/saadway/`,
+  the session ACL under `/usr/share/rpcd/acl.d/` and the new menu entry
+  under `/usr/share/luci/menu.d/`. The new
+  `root/usr/share/luci/menu.d/luci-app-saadway.json` registers
+  `admin/saadway` → view `saadway/dashboard` with
+  `depends.acl = ["luci-app-saadway"]` — the very group this package
+  installs — so the documented Administration → SaadWay surface exists
+  (LuCI2 builds its route tree from exactly these menu files) while the
+  page stays limited to status + toggle + link (Principle V / FR-022).
+  Verification: a host-side stub-SDK make parse (stub `rules.mk` +
+  `package.mk` with a `BuildPackage` probe) reports
+  `BUILD_PACKAGE_CALLED:luci-app-saadway` and parses cleanly — i.e. the
+  metadata scanner now registers the package and
+  `package/luci-app-saadway/compile` exists; all three install-referenced
+  assets exist; both JSON files parse and their ACL group / menu
+  `depends.acl` names match; `PKGARCH:=all` with no shipped binary; the
+  asset audit in §9 now lists the LuCI app's three files. The
+  authoritative `make package/luci-app-saadway/compile` in the SDK that
+  produced `saadway-1.0.0-r1.apk`, plus the on-device check that the
+  page appears and its two `saadway.mgmt.*` calls are authorized, stay
+  in the T046/T057 round.
 
 ## 9. Footprint pointers → T045
 
@@ -444,6 +472,16 @@ suite must be re-run against the **corrected** stub; the authoritative
   SPA docroot → `/www/saadway/`, uci-defaults `40-saadway-uhttpd` +
   `50-saadway-rpcd` → `/etc/uci-defaults/`. All referenced sources exist;
   the formerly empty `/etc/saadway/htdocs` install dir is removed.
+* LuCI app assets (`luci-app-saadway`, T064): the view
+  `htdocs/luci-static/resources/view/saadway/dashboard.js` →
+  `/www/luci-static/resources/view/saadway/`, the session ACL
+  `root/usr/share/rpcd/acl.d/luci-app-saadway.json` →
+  `/usr/share/rpcd/acl.d/`, and the menu entry
+  `root/usr/share/luci/menu.d/luci-app-saadway.json` →
+  `/usr/share/luci/menu.d/`. The ACL group name (`luci-app-saadway`) is
+  the same one the menu entry's `depends.acl` references, so the menu
+  gate and the RPC grant stay consistent. The package is `PKGARCH:=all`
+  and ships no binary.
 * `DEPENDS` (core package): `libubus libubox libuci libblobmsg-json
   libjson-c firewall4 kmod-nft-core kmod-nft-nat procd uci ubus
   dnsmasq-full ip-full openvpn-openssl strongswan strongswan-swanctl
