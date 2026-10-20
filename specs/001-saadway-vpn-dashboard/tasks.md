@@ -213,6 +213,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation round 7 (Phase 18)**: independent of the C-code phases (the daemon already packages) — T064 converts the LuCI app into a standalone SDK-buildable package and adds the missing LuCI menu entry; sequential (Makefile → menu asset → asset audit), SDK app-build proof folds into the T046/T057 round
 - **Remediation round 8 (Phase 19)**: depends on Phase 18 (T064) — T065 repairs the package METADATA that T064 placed in the wrong evaluation scope (version fields must be top-level so `Package/Default` can derive `VERSION`) and adds the empty build blocks a file-only package needs; the asset set from T064 is unchanged, SDK app-build proof folds into the T046/T057 round
 - **Remediation round 9 (Phase 20)**: depends on the Phase 6 uhttpd wiring (T032) that shipped `saadway/files/uci-defaults/40-saadway-uhttpd` — T066 sanitises the listener address the script writes (CIDR strip + validated bare IPv4 + wildcard-free LAN binding + `commit uhttpd`), T067 adds the host-side audit that reproduces the pre-fix failure, T068 traces the fix into quickstart Scenario 4 and the on-device checklist; T066 → T067 is a fix-then-prove sequence, T067 is file-disjoint from T066 and may be written in parallel (it must fail first), the on-device proof folds into the T046/T057 round
+- **Remediation round 10 (Phase 21)**: depends on the Phase 1/2 daemon + init-script state (T008 `saadway.init`, T007 the ubus object) — T069 makes the daemon resolve the ubus socket through libubus (`ubus_connect(NULL)`, no hardcoded path) and replaces the non-existent `procd_add_restart_trigger` with the upstream `procd_add_reload_trigger "network"`, T070 adds the host-side audit (procd API surface + no hardcoded socket path) that reproduces both pre-fix failures, T071 traces the fix into quickstart Scenario 1 and the on-device checklist; T069 → T070 is fix-then-prove, T070 is file-disjoint from T069 and may be written in parallel (it must fail first), the on-device startup proof folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -235,6 +236,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - Story-local [P] tasks as marked (e.g. T012/T013 both tunnel backends concurrently)
 - Phase 12: T056 (worktree/`.gitignore` cleanup) is parallel-safe; T055 review can overlap T056 but NOT T054 (same `saadway/Makefile` file); T057 runs last, after T054–T056
 - Phase 20: T067 (the host-side uci-defaults audit + its pre-fix fixture) is file-disjoint from T066 and can be written in parallel — it must FAIL against the pre-fix script before T066 lands
+- Phase 21: T070 (the host-side service-startup audit + the upstream procd helper fixture) is file-disjoint from T069 and can be written in parallel — it must FAIL against the pre-fix init script / sources before T069 lands
 
 ---
 
@@ -602,3 +604,65 @@ JSON-RPC transport it depends on are therefore both unreachable, and the LuCI
   - The authoritative on-device proof (the listener values, the uhttpd log line and the SPA reachability listed in the first bullet) is folded into the T046/T057 on-device round.
 
 **Checkpoint**: the first-boot script can no longer write an unresolvable listener host; the LAN binding is validated, wildcard-free and survives a reboot; the host-side audit proves both the fixed behaviour and the pre-fix failure; the on-device proof is queued with T046/T057.
+
+---
+
+## Phase 21: Remediation Round 10 — ubus Socket Auto-Resolution & procd Trigger Correctness
+
+**Purpose**: On a stock OpenWrt 25.12 device the daemon dies during startup
+with `saadwayd: cannot connect ubus at /var/run/ubus.sock: No such file or
+directory`, and the service's rc link logs `procd: /etc/rc.d/S99saadway: line
+45: procd_add_restart_trigger: not found`. Neither defect is a configuration
+problem — both are the code using an API that no longer exists the way it
+does.
+
+**Root cause (verified against upstream — see the facts below):**
+- `saadway/src/saadway.h:51` hardcodes the legacy socket path
+  (`#define SW_UBUS_SOCK "/var/run/ubus.sock"`) and `saadway/src/main.c:591`
+  connects with `ubus_connect(SW_UBUS_SOCK)`. Since OpenWrt 21.02 the system
+  socket lives at **`/var/run/ubus/ubus.sock`**, so the connect fails with
+  ENOENT, `main()` returns 1 and the daemon exits **before** registering its
+  ubus object → no `saadway` object, no management surface, no dashboard, no
+  LuCI page. libubus already knows the correct path — the caller must not
+  second-guess it.
+- `saadway/files/saadway.init:45` calls `procd_add_restart_trigger "network"`,
+  which upstream does not export at all: the complete `procd_*` helper set
+  (the `_procd_wrapper` export list) contains `procd_add_reload_trigger`,
+  `procd_add_reload_data_trigger`, `procd_add_reload_interface_trigger`,
+  `procd_add_reload_mount_trigger`, `procd_add_restart_mount_trigger`,
+  `procd_add_raw_trigger`, `procd_add_config_trigger` — but **no**
+  `procd_add_restart_trigger` → rc.common's shell reports "not found" on every
+  start. The *reload* trigger is also the semantically correct one here: it
+  fires `config.change` on /etc/config/network → `/etc/init.d/saadway reload`
+  → the daemon's SIGHUP handler re-reads UCI and re-applies the policy
+  atomically (no tunnel drop), which is exactly what the comment on lines
+  41–42 asks for.
+
+**Upstream facts (fetched for this task — upstream is the oracle):**
+- `openwrt/ubus@master` → `CMakeLists.txt`: `SET(UBUS_UNIX_SOCKET "/var/run/ubus/ubus.sock")` + `ADD_DEFINITIONS(-DUBUS_UNIX_SOCKET=…)`; `libubus-io.c` → `ubus_reconnect()`: `if (!path) path = UBUS_UNIX_SOCKET;` → **`ubus_connect(NULL)` resolves the system socket**. `UBUS_UNIX_SOCKET` is a library-internal compile-time constant (it is NOT in any public header) → a client cannot reference it, so the daemon must not carry its own copy of the path either.
+- `openwrt/openwrt@master` → `package/system/procd/files/procd.sh` (installed as `/lib/functions/procd.sh`): the `_procd_wrapper` export block IS the definitive `procd_*` API surface; `_procd_add_reload_trigger()` adds a `config.change` trigger on the named config file → `/etc/init.d/<service> reload` — a RELOAD (SIGHUP) trigger, not a restart.
+- `procd_set_param` has no `depends` key → upstream offers no "wait for ubus" parameter; the boot-order race is covered by the respawn policy already set in `start_service()` (`respawn 3600 5 5` → up to 5 retries with a 5 s backoff).
+- The dev stub pool already mirrors the upstream signature (`struct ubus_context *ubus_connect(const char *path);`) → `ubus_connect(NULL)` compiles unchanged against it; no stub change is needed.
+
+- [ ] T069: Resolve the ubus socket through libubus and use an upstream-exported procd trigger (broken) per Constitution I (Native Platform Compliance — the daemon must run against the STOCK OpenWrt 25.12 userland: the stock ubus socket location and the stock procd helper API) and Constitution IV (fail closed: the daemon must not die before its management surface exists), with docs/verify-2512.md §10 (build-time record) — target files: `saadway/src/saadway.h`, `saadway/src/main.c`, `saadway/files/saadway.init`:
+  - `saadway/src/saadway.h:51` — DELETE the `SW_UBUS_SOCK` define (and the `SW_UBUS_SOCK` line itself). It encodes the pre-21.02 path `/var/run/ubus.sock`; the stock 25.12 path is `/var/run/ubus/ubus.sock` and libubus owns that knowledge. Add NO replacement constant: `UBUS_UNIX_SOCKET` is a library-internal compile-time define, not part of the public headers, so a client-side copy would be a second source of truth.
+  - `saadway/src/main.c:591` — connect with `ubus_connect(NULL)` so libubus resolves the system socket (upstream chain: `ubus_connect(NULL)` → `ubus_connect_ctx(ctx, NULL)` → `ubus_reconnect(ctx, NULL)` → `if (!path) path = UBUS_UNIX_SOCKET;`). Keep the single client context and the fail-closed `if (!c->ubus) { … return 1; }` path — but the error message must no longer interpolate the deleted constant: log `cannot connect ubus: %s` with `strerror(errno)` (the socket path is no longer known to the daemon, and errno is the connect() error — ENOENT on a stock device). The daemon must never carry its own copy of the socket path.
+  - `saadway/files/saadway.init:45` — replace `procd_add_restart_trigger "network"` with `procd_add_reload_trigger "network"`. The helper does not exist upstream; the reload trigger is both the valid call and the correct semantics (config.change on /etc/config/network → `/etc/init.d/saadway reload` → the daemon's SIGHUP path re-reads UCI and re-applies the policy atomically, no tunnel drop — matching the existing comment on lines 41–42).
+  - Keep the surrounding contract untouched: `START=99` / `STOP=10`, `USE_PROCD=1`, `PROG=/usr/bin/saadway`, the respawn policy (`respawn 3600 5 5` — it covers the case where the daemon is started before ubusd is up: procd retries with a 5 s backoff), `procd_set_param reload_signal SIGHUP`, `procd_set_param file /etc/config/saadway`, the two existing `procd_add_reload_trigger "firewall"` / `"saadway"` lines, and the file's `/etc/rc.common` + POSIX-sh contract (no bashisms; the existing shellcheck disable comment stays as it is).
+  - Do NOT invent a "wait for ubus" mechanism: upstream `procd_set_param` has no `depends` key, and the respawn policy is the upstream-sanctioned recovery path.
+  - Verification per docs/verify-2512.md: (i) strict greps — no `SW_UBUS_SOCK` reference and no absolute ubus socket path (`/var/run/ubus.sock`, `/var/run/ubus/ubus.sock`) may remain anywhere in `saadway/`; (ii) the host-side service-startup audit of T070 is green; (iii) `gcc -fsyntax-only` over all 13 modules against the dev stub pool (the stub already declares `ubus_connect(const char *)` exactly like upstream → `ubus_connect(NULL)` compiles unchanged), the unit suite still 21/21 and `tests/link-audit.sh` still green (the link surface must not change — `ubus_connect` was already linked); (iv) `shellcheck -s sh` clean on `saadway/files/saadway.init`; (v) the authoritative on-device proof — folded into the T046/T057 round: `/etc/init.d/saadway start` must log NO "cannot connect ubus" line and NO "procd_add_restart_trigger: not found" line, `ubus list | grep saadway` must show the `saadway` object, and `ubus call saadway mgmt.status` must answer (quickstart Scenario 1 step 3).
+
+- [ ] T070 [P]: Ship a host-side service-startup audit that would have caught both defects (missing) per Constitution I (Native Platform Compliance — the init script may only call helpers the platform actually exports) and Gate 3 (runtime behaviour), with docs/verify-2512.md §10 (build-time record) — target files: `tests/service-startup-audit.sh` (new), `tests/fixtures/procd-exported-helpers.txt` (new):
+  - `tests/service-startup-audit.sh` — POSIX sh, shellcheck-clean, next to the existing `tests/link-audit.sh`, `tests/pkg-metadata-audit.sh` and the Phase-20 `tests/uci-defaults-audit.sh`. Two offline checks:
+    (a) **procd API surface** — every `procd_*` function called by `saadway/files/saadway.init` must appear in the upstream exported set (`tests/fixtures/procd-exported-helpers.txt`). A call to a helper upstream does not export is exactly the defect that produced "procd_add_restart_trigger: not found" → the audit must FAIL on it and name the offending call and its line.
+    (b) **no hardcoded ubus socket path** — no absolute ubus socket path (`/var/run/ubus.sock`, `/var/run/ubus/ubus.sock`) and no `SW_UBUS_SOCK` reference may remain in `saadway/src/*.c` / `saadway/src/*.h`: the daemon must let libubus resolve the socket (`ubus_connect(NULL)`), the only variant that survives a change of the system socket location.
+  - The audit takes the init-script path and the daemon source dir as arguments (defaults: the shipped ones), so the same audit can be pointed at a pre-fix snapshot — the negative case must FAIL: against the pre-fix init script it must report `procd_add_restart_trigger` as not exported, and against the pre-fix sources it must report the hardcoded socket path. Capture the snapshots with `git show HEAD:saadway/files/saadway.init` and `git show HEAD:saadway/src/saadway.h` BEFORE the T069 change is committed (after the commit, HEAD no longer holds the broken versions).
+  - `tests/fixtures/procd-exported-helpers.txt` — the upstream helper list, one name per line, with a header comment naming its source (openwrt/openwrt `package/system/procd/files/procd.sh`, the `_procd_wrapper` export block; the file is installed as /lib/functions/procd.sh). It is a dev-time fixture: it is NEVER installed on a device and never influences runtime behaviour.
+  - Verification per docs/verify-2512.md: (i) `sh tests/service-startup-audit.sh` exits 0 against the shipped tree; (ii) the same audit pointed at the pre-fix snapshots exits 1 and NAMES the offending helper / socket literal; (iii) `shellcheck -s sh -S warning` clean.
+
+- [ ] T071: Trace the ubus-socket / procd-trigger fix into the quickstart and the on-device checklist (missing) per Gate 1 (platform) + Gate 4 (the ubus surface must answer for the tunnel activation checks) and FR-020/FR-022, with docs/verify-2512.md §10 (build-time record) — target files: `specs/001-saadway-vpn-dashboard/quickstart.md`, `docs/verify-2512.md`:
+  - `quickstart.md` Scenario 1 — APPEND one numbered step (the existing steps keep their numbering and text): on a stock 25.12 device the daemon must come up — `logread | grep -i saadway` contains no "cannot connect ubus" line, `ubus list | grep saadway` shows the `saadway` ubus object, and starting the service through `/etc/init.d/saadway start` logs no "not found" from `/etc/rc.d/S99saadway` (the init script calls only upstream-exported procd helpers).
+  - `docs/verify-2512.md` — §10: record the applied change (the socket auto-resolution, the deleted `SW_UBUS_SOCK`, the error-message change and the trigger correction) together with the upstream sources it was derived from (openwrt/ubus `CMakeLists.txt` → `UBUS_UNIX_SOCKET` and `libubus-io.c` → `ubus_reconnect`; openwrt/openwrt `package/system/procd/files/procd.sh` → the `_procd_wrapper` export list and `_procd_add_reload_trigger`), and add the on-device checks (no "cannot connect ubus", no "not found", `ubus list` shows the object) to the device checklist.
+  - The authoritative on-device proof (the startup log, the `ubus list` object and `ubus call saadway mgmt.status`) is folded into the T046/T057 on-device round.
+
+**Checkpoint**: the daemon resolves the ubus socket through libubus (no hardcoded socket path anywhere in the tree), the init script calls only upstream-exported procd helpers, the host-side audit proves both the fixed state and the two pre-fix failures, and the on-device startup proof is queued with T046/T057.
