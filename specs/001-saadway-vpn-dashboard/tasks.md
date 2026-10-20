@@ -214,6 +214,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation round 8 (Phase 19)**: depends on Phase 18 (T064) — T065 repairs the package METADATA that T064 placed in the wrong evaluation scope (version fields must be top-level so `Package/Default` can derive `VERSION`) and adds the empty build blocks a file-only package needs; the asset set from T064 is unchanged, SDK app-build proof folds into the T046/T057 round
 - **Remediation round 9 (Phase 20)**: depends on the Phase 6 uhttpd wiring (T032) that shipped `saadway/files/uci-defaults/40-saadway-uhttpd` — T066 sanitises the listener address the script writes (CIDR strip + validated bare IPv4 + wildcard-free LAN binding + `commit uhttpd`), T067 adds the host-side audit that reproduces the pre-fix failure, T068 traces the fix into quickstart Scenario 4 and the on-device checklist; T066 → T067 is a fix-then-prove sequence, T067 is file-disjoint from T066 and may be written in parallel (it must fail first), the on-device proof folds into the T046/T057 round
 - **Remediation round 10 (Phase 21)**: depends on the Phase 1/2 daemon + init-script state (T008 `saadway.init`, T007 the ubus object) — T069 makes the daemon resolve the ubus socket through libubus (`ubus_connect(NULL)`, no hardcoded path) and replaces the non-existent `procd_add_restart_trigger` with the upstream `procd_add_reload_trigger "network"`, T070 adds the host-side audit (procd API surface + no hardcoded socket path) that reproduces both pre-fix failures, T071 traces the fix into quickstart Scenario 1 and the on-device checklist; T069 → T070 is fix-then-prove, T070 is file-disjoint from T069 and may be written in parallel (it must fail first), the on-device startup proof folds into the T046/T057 round
+- **Remediation round 11 (Phase 22)**: depends on the Phase 6 auth bridge (T028/T032 — `50-saadway-rpcd`, `saadway-provision`, the SPA login form) — T072 ships the dashboard with the `admin` / `admin` default credential (username rename, hash-only password via the stock rpcd `$p$` bridge and the stock busybox applets, in-place migration of an already-provisioned device, `uci commit rpcd`), T073 adds the host-side credential audit that reproduces the pre-change state, T074 reconciles the contracts, the data model, the quickstart and the verify record (incl. the recorded deviation for the weak default); T072 → T073 is fix-then-prove, T073 is file-disjoint from T072 and may be written in parallel (it must fail first), the on-device login proof folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -237,6 +238,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - Phase 12: T056 (worktree/`.gitignore` cleanup) is parallel-safe; T055 review can overlap T056 but NOT T054 (same `saadway/Makefile` file); T057 runs last, after T054–T056
 - Phase 20: T067 (the host-side uci-defaults audit + its pre-fix fixture) is file-disjoint from T066 and can be written in parallel — it must FAIL against the pre-fix script before T066 lands
 - Phase 21: T070 (the host-side service-startup audit + the upstream procd helper fixture) is file-disjoint from T069 and can be written in parallel — it must FAIL against the pre-fix init script / sources before T069 lands
+- Phase 22: T073 (the host-side credential audit + its pre-change fixture) is file-disjoint from T072 and can be written in parallel — it must FAIL against the pre-change login script before T072 lands
 
 ---
 
@@ -666,3 +668,100 @@ does.
   - The authoritative on-device proof (the startup log, the `ubus list` object and `ubus call saadway mgmt.status`) is folded into the T046/T057 on-device round.
 
 **Checkpoint**: the daemon resolves the ubus socket through libubus (no hardcoded socket path anywhere in the tree), the init script calls only upstream-exported procd helpers, the host-side audit proves both the fixed state and the two pre-fix failures, and the on-device startup proof is queued with T046/T057.
+
+---
+
+## Phase 22: Remediation Round 11 — Dashboard Default Credential (`admin` / `admin`)
+
+**Purpose**: The dashboard's dedicated credential is today the system user
+`saadway-admin` with **no** default password — the operator sets one over SSH
+through `/usr/libexec/saadway/provision`. The operator asked for the dashboard
+to ship with the **default credential `admin` / `admin`**.
+
+**What changes — and the invariants that must survive the change:**
+- The rpcd login section's username becomes `admin` and its shadow bridge
+  becomes `'$p$admin'` (upstream resolves `$p$<name>` with
+  `getspnam(<name>)` — the suffix MUST name the shadow row of the user
+  `admin`).
+- The default password `admin` is applied **only** as a crypt(3) hash in
+  `/etc/shadow` (0600): never as plaintext in a UCI option, never in any
+  world-readable file, never as a command argument (argv is readable through
+  `/proc/<pid>/cmdline`), and never in the SPA's page source.
+- The SPA pre-fills the **username only**. The password field MUST stay
+  empty: the SPA is served to every LAN client, so a pre-filled password
+  would publish the credential to anyone who can fetch `index.html`.
+- The account stays nologin (`-s /bin/false`), UID 355, group `saadway`, and
+  the ACL grant stays least-privilege (`list read saadway` / `list write
+  saadway`) — the rename must NOT widen the grant (no `list read '*'`).
+- The account is still created by the provisioning step — the change makes
+  that step **non-interactive**, not optional: until it has run,
+  `session.login` fails closed (rpcd: `getspnam("admin")` fails →
+  PERMISSION_DENIED, never a fail-open).
+- Devices that already ran the old script must be **migrated**: the login
+  section is updated in place (not skipped because it already exists) and the
+  stale `saadway-admin` shadow/passwd rows are removed.
+
+**Upstream facts (fetched for this task — upstream is the oracle):**
+- `openwrt/rpcd@master` → `session.c:832-858`: a login section whose
+  `option password` starts with `$p$` is resolved with
+  `getspnam(hash + 3)` and the candidate password is compared through
+  `rpc_login_test_password(sp->sp_pwdp, password)`; a missing shadow entry
+  fails the login (fail-closed). Hence the option MUST be `'$p$admin'` and
+  the hash MUST live in `/etc/shadow` — a plaintext or a copied hash in UCI
+  would violate FR-021 / Constitution IV.
+- `openwrt/openwrt@master` → `package/utils/busybox/config/loginutils/Config.in`:
+  OpenWrt's busybox carries the `chpasswd` and `cryptpw` applets next to
+  `passwd` (`BUSYBOX_CONFIG_CHPASSWD`, `BUSYBOX_CONFIG_CRYPTPW`) → the
+  password can be applied non-interactively with the plaintext passed over
+  **stdin** (`chpasswd` reads `user:password` from stdin), never through
+  argv. The provisioning script must still probe at runtime and fail closed
+  with a clear message when none of `chpasswd` / `passwd` (stdin) /
+  `cryptpw` is present.
+- `spec.md` FR-020 ("MUST be protected by its own username/password") stays
+  valid — `admin` is such a credential; FR-021 + Constitution IV are what
+  constrain WHERE it may live (0600, never in a response or a log).
+- `contracts/api.md` carries the username in its login example → it changes
+  with the implementation.
+
+**Recorded deviation (must be recorded, not silently shipped):** a well-known
+default credential is weak. The compensating controls are: the uhttpd
+listener is LAN-bound (Phase 20 / T066), the ACL grant is least-privilege,
+the account is nologin, the credential never leaves `/etc/shadow`, and the
+provisioning step prints a change-password warning. The deviation is
+recorded in `docs/verify-2512.md` in the §7 "recorded implementation
+deviation" style.
+
+- [ ] T072: Ship the dashboard with the default credential `admin` / `admin` (broken) per FR-020 (the dashboard MUST be protected by its own username/password) and FR-021 + Constitution IV (the secret lives ONLY in a 0600 file and never in a response, a log or a world-readable UCI option), with docs/verify-2512.md §2 (auth-bridge record) + the §7-style deviation entry — target files: `saadway/files/uci-defaults/50-saadway-rpcd`, `saadway/files/saadway-provision`, `saadway/files/htdocs/saadway/index.html`, `saadway/files/rpc-acl.json`:
+  - `saadway/files/uci-defaults/50-saadway-rpcd` — the login mapping: `set rpcd.saadway_admin.username='admin'` and `set rpcd.saadway_admin.password='$p$admin'`. The section NAME stays `saadway_admin` (rpcd matches a login section by its `username` option, the section name is cosmetic — keeping it avoids colliding with the stock `login` sections in `/etc/config/rpcd`). The ACL lists stay `saadway` (read+write) — the rename must not widen the grant.
+  - `saadway/files/uci-defaults/50-saadway-rpcd` — the script must become **idempotent AND migrating**: it currently creates the section only when `uci -q get rpcd.saadway_admin` fails, so an upgraded device would keep the OLD `username='saadway-admin'` / `'$p$saadway-admin'` mapping forever. Split it: create the section (with its `read`/`write` lists) only when it is missing; ALWAYS set `username` and `password` afterwards. `add_list` must stay inside the create branch — re-adding the lists on an existing section would duplicate the entries.
+  - `saadway/files/uci-defaults/50-saadway-rpcd` — add `uci -q commit rpcd` after the batch: `uci batch` writes only the package delta under `/tmp/.uci` (tmpfs), so without the commit the login mapping (and the migration!) is silently lost on the next reboot. Same defect class as the uhttpd listener in Phase 20 / T066.
+  - `saadway/files/saadway-provision` — `USER=admin` (the name MUST match the `$p$` suffix in the rpcd section — upstream `getspnam(hash + 3)`); the nologin shell, the UID 355 / GID 355 and the `saadway` group stay as they are.
+  - `saadway/files/saadway-provision` — the `set` action becomes NON-INTERACTIVE: it creates the user (existing `do_add` unchanged) and then applies the default password over **stdin** — `printf '%s:%s\n' "$USER" "$DEFAULT_PASSWORD" | chpasswd` — with the fallbacks `passwd` fed from stdin and `cryptpw` + a staged `/etc/shadow` rewrite (the script already does staged `/etc/shadow` rewrites in `do_add`/`do_del`). The plaintext MUST never be an argument: `chpasswd`/`passwd`/`cryptpw` invoked with the password in argv would expose it through `/proc/<pid>/cmdline`. Probe the available applet at runtime and, if none of `chpasswd` / `passwd` / `cryptpw` exists, FAIL CLOSED with a clear message and a non-zero exit — never leave the account without a usable hash.
+  - `saadway/files/saadway-provision` — after the password is set, print a prominent warning that the default credential is in use and how to change it (`/usr/libexec/saadway/provision passwd`), and keep the existing `restart_rpcd` call so rpcd picks the mapping up.
+  - `saadway/files/saadway-provision` — add a `passwd` action that runs the interactive `passwd admin` (the operator's way to leave the default behind) and keep the existing `unset` action; BOTH must also remove the stale legacy `saadway-admin` rows from `/etc/passwd` and `/etc/shadow` (same staged-rewrite pattern) so the old credential cannot survive an upgrade.
+  - `saadway/files/htdocs/saadway/index.html` — the login form's username input becomes `value="admin"`; the password input MUST NOT get a `value` attribute. The SPA is served to every LAN client, so a pre-filled password would publish the credential to anyone who can read the page source — the default password is typed by the operator, it is not shipped in the document.
+  - `saadway/files/rpc-acl.json` — update the group description text to name the `admin` login (the ACL group name stays `saadway`; the grant stays least-privilege).
+  - No new UI strings are required → the fa/en i18n catalogs stay in parity (113 = 113); if a hint string IS added, both catalogs must be updated together.
+  - Verification per docs/verify-2512.md: (i) the host-side credential audit of T073 is green; (ii) `shellcheck -s sh` clean on both shipped scripts; (iii) strict greps — no `saadway-admin` reference may remain in the shipped tree, the rpcd option must be exactly `'$p$admin'`, and no plaintext password may appear in any UCI-writing file; (iv) the authoritative on-device proof — folded into the T046/T057 round: `session.login` with `admin`/`admin` succeeds on a provisioned device, `uci get rpcd.saadway_admin.password` prints `$p$admin` (never a hash or a plaintext), `/etc/shadow` carries a hash for `admin` and the file stays 0600, `grep -r admin /etc/config/rpcd` shows no credential material, and the SPA's page source contains no password.
+
+- [ ] T073 [P]: Ship a host-side audit for the dashboard credential (missing) per Constitution I (Native Platform Compliance — the credential must flow through the stock rpcd `$p$` bridge and the stock busybox applets) and FR-021 (the secret must never appear in a world-readable file or in the page source), with docs/verify-2512.md §10 (build-time record) — target files: `tests/dashboard-credential-audit.sh` (new), `tests/fixtures/50-saadway-rpcd.prefix` (new):
+  - `tests/dashboard-credential-audit.sh` — POSIX sh, shellcheck-clean, next to the existing `tests/link-audit.sh`, `tests/pkg-metadata-audit.sh`, `tests/uci-defaults-audit.sh` and `tests/service-startup-audit.sh`. It takes the paths under audit as arguments (defaults: the shipped ones) so the same audit can be pointed at a pre-change snapshot. Checks:
+    (a) **rpcd mapping** — `saadway/files/uci-defaults/50-saadway-rpcd` sets `username='admin'` and `password='$p$admin'` (the `$p$` reference exactly — never a hash, never a plaintext) and commits the package (`uci ... commit rpcd`, or the migration would be lost on the next reboot); the ACL lists stay `saadway` — a wildcard (`'*'`) must not appear in the login section.
+    (b) **no plaintext credential** — no shipped file may contain a UCI password assignment whose value is not a `$p$` reference (`option password '...'`), and the default password literal must not appear in any UCI-writing file.
+    (c) **SPA** — `saadway/files/htdocs/saadway/index.html`: the username input carries `value="admin"`, and the password input line carries NO `value=` attribute (the credential must not be published in the page source).
+    (d) **provisioning** — `saadway/files/saadway-provision`: the password is piped to the setter (stdin) and never passed as an argument — no line may contain a password-setting applet (`chpasswd` / `passwd` / `cryptpw`) AND the password literal in the same command; the script must probe for the applets and fail closed when none is available.
+    (e) **no legacy reference** — the string `saadway-admin` must not remain in the shipped tree (`saadway/`, `luci-app-saadway/`).
+  - `tests/fixtures/50-saadway-rpcd.prefix` — a verbatim snapshot of the PRE-CHANGE login script, kept ONLY as the negative fixture (never installed on a device). Capture it with `git show HEAD:saadway/files/uci-defaults/50-saadway-rpcd` BEFORE the T072 change is committed (after the commit, HEAD no longer holds the old version). The audit MUST fail against it (checks (a), (b) and (e)) and pass against the shipped script — the proof that the audit has teeth, in the same spirit as the negative cases of `tests/pkg-metadata-audit.sh` and `tests/uci-defaults-audit.sh`.
+  - The audit must NEVER execute `/usr/libexec/saadway/provision` on the build host: it touches `/etc/passwd` and `/etc/shadow` — the checks are static by design.
+  - Verification per docs/verify-2512.md: (i) `sh tests/dashboard-credential-audit.sh` exits 0 against the shipped tree; (ii) the same audit pointed at the pre-change snapshot exits 1 and NAMES the failing check; (iii) `shellcheck -s sh -S warning` clean.
+
+- [ ] T074: Reconcile the contracts, the data model, the quickstart and the verify record with the new default credential (missing) per FR-020/FR-021 and Gate 6 (dual UI + session security), with docs/verify-2512.md §2 (auth-bridge record) + the §7-style recorded-deviation entry — target files: `specs/001-saadway-vpn-dashboard/contracts/api.md`, `specs/001-saadway-vpn-dashboard/contracts/uci.md`, `specs/001-saadway-vpn-dashboard/data-model.md`, `specs/001-saadway-vpn-dashboard/quickstart.md`, `docs/verify-2512.md`:
+  - `contracts/api.md` — the `session.login` example carries `"username":"saadway-admin"`: it becomes `"admin"`, and the prose that names the `$p$saadway-admin` bridge becomes `$p$admin`. Add the default-credential statement and the change procedure, and keep the transport conventions (JSON-RPC over HTTPS/LAN, the 32-zero session id for login) untouched.
+  - `contracts/uci.md` — the `dashboard` section's `option authentication 'dedicated'` comment names the `saadway-admin` bridge: it becomes the `admin` bridge; the paragraph that states where credential material lives must keep its invariant (the hash in `/etc/shadow`, never a UCI option) and name the new user.
+  - `data-model.md` — the `DashboardSession` entity (the auth-material bullet, L139ff) and the storage-layout summary (`/etc/shadow (saadway-admin)` → `/etc/shadow (admin)`, `/etc/config/rpcd` → `saadway_admin` login section) must match the implementation.
+  - `quickstart.md` — the first-login prose (before Scenario 1) must state the new enablement flow: `/usr/libexec/saadway/provision` creates the nologin user `admin` and applies the DEFAULT password non-interactively (the operator is prompted for nothing), the dashboard is then reachable with `admin` / `admin`, and `/usr/libexec/saadway/provision passwd` changes it (the interactive path) — with the explicit note that the credential material never lives in a world-readable UCI option.
+  - `docs/verify-2512.md` — §2 (the auth-bridge record): the new username, the `$p$admin` bridge, the non-interactive default-password mechanism (stdin → `chpasswd` / `passwd` / `cryptpw` with the busybox applet evidence), the migration path (the login section is updated in place, the legacy `saadway-admin` rows are removed) and the upstream sources they were derived from (`openwrt/rpcd` `session.c` → `getspnam(hash + 3)` + `rpc_login_test_password`, `openwrt/openwrt` `package/utils/busybox/config/loginutils/Config.in` → `chpasswd`/`cryptpw`). Add a §7-style **recorded deviation**: a well-known default credential is weak — list the compensating controls (LAN-bound uhttpd listener per T066, least-privilege ACL, nologin account, hash-only storage, the change-password warning) and the operator action (`provision passwd`).
+  - `spec.md` needs NO change: FR-020 names no username ("its own username/password") and stays valid for the `admin` credential.
+  - The authoritative on-device proof (a successful `admin`/`admin` login, `$p$admin` in `/etc/config/rpcd`, a hash-only 0600 `/etc/shadow` row, no credential material in the page source) is folded into the T046/T057 on-device round.
+
+**Checkpoint**: the dashboard ships with the `admin` / `admin` default credential, the credential exists only as a hash in the 0600 `/etc/shadow`, the SPA publishes no password, the account stays nologin and least-privilege, the host-side audit proves both the new state and the pre-change failure, and the weak default is recorded as a deviation with its compensating controls.
