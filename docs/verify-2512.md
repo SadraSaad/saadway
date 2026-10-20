@@ -419,6 +419,25 @@ this phase; each traces to the appended tasks.md lines.
   13-object pipeline + link line; a real object compile with an
   overridden `CFLAGS` proves the cross-flag plumbing; `make clean`
   works; shellcheck stays clean.
+* **OpenWrt `Build/Compile` mechanics (upstream facts for Phase 14 /
+  T060).** `include/package-defaults.mk` (openwrt@main): `MAKE_VARS` =
+  `CFLAGS="$(TARGET_CFLAGS) $(EXTRA_CFLAGS) $(TARGET_CPPFLAGS)
+  $(EXTRA_CPPFLAGS)"` and `MAKE_FLAGS` = `$(TARGET_CONFIGURE_OPTS)
+  CROSS="$(TARGET_CROSS)" ARCH="$(ARCH)"`; the default `Build/Compile`
+  runs `$(MAKE) -C $(PKG_BUILD_DIR)/$(MAKE_PATH)` with those vars and
+  passes **no `CC`**. `include/toplevel.mk` force-clears the environment
+  (`export CFLAGS=`, `export LDFLAGS=`). Therefore a delegated
+  `src/Makefile` must default `CC ?= $(CROSS)gcc`, consume `$(CFLAGS)`
+  and `$(CPPFLAGS)`, and receive the target staging include path through
+  `TARGET_CPPFLAGS` (folded into `CFLAGS` upstream) — i.e.
+  `TARGET_CPPFLAGS += -I$(STAGING_DIR)/usr/include` in the package
+  Makefile, with no custom `Build/Compile` block. Header-name check for
+  the same round: libuci installs **`<uci.h>`** (not `<libuci.h>`);
+  `<libubox/uloop.h>`, `<libubox/blobmsg.h>`, `<libubus.h>` and
+  `<json-c/json.h>` are correct as-is. The host unit suite was masked
+  from this class of error because the DEV-ONLY stub pool named its
+  declare-only header `libuci.h` — the pool must mirror real OpenWrt
+  header names from now on.
 
 ---
 

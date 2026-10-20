@@ -206,6 +206,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Convergence (Phases 10–11)**: appended after implementation; T047–T053 carry the code/contract fixes derived from the converge audits (T047 dnsmasq-full, T048 LuCI ACL, T049 auth reconciliation incl. `libmbedtls` removal, T050 D2 ratification, T051 i18n, T052 record, T053 session_timeout)
 - **Remediation (Phase 12)**: depends on the Phase 1–11 code state — specifically on T049's `libmbedtls` DEPENDS removal whose stale link-line echo is what T054 repairs; T057 validates the packaged tree once T054–T056 land
 - **Remediation round 2 (Phase 13)**: supersedes the Phase-12 in-package compile approach after the real-SDK link failure persisted; depends on the Phase 1–12 code state; T058 → T059 strictly sequential (same-file/delegation coupling); final validation folds into the T046/T057 on-device round
+- **Remediation round 3 (Phase 14)**: depends on the Phase 13 delegation structure (T058) — T060 corrects the header name and the toolchain/staging-include propagation inside it; T060 is the only task, sequential by nature (header fix → staging path → cross-CC default); the authoritative SDK build proof folds into the T046/T057 on-device round
 
 ### User Story Dependencies
 
@@ -301,3 +302,31 @@ pattern: a plain source-tree `src/Makefile` plus the default
 - [X] T059: Sync the binary-path change across consumers: `saadway/files/saadway.init` `PROG=/usr/bin/saadway`; `docs/verify-2512.md` §9 install list + §9 link-parity audit (musl `-lpthread` stub note); host-side validation — `make -C saadway/src -n` pipeline + link line, real object compile with overridden `CFLAGS`, `make clean`, shellcheck on the init script — per Gate 3 proxies (partial)
 
 **Checkpoint**: package Makefile carries no `Build/Compile`; a clean-SDK build delegates to `src/Makefile` and stages `/usr/bin/saadway`; path consumers agree.
+
+## Phase 14: Remediation Round 3 — Cross-Compile Header & Staging-Include Fix
+
+**Purpose**: Resolve the OpenWrt 25.12 SDK (`ipq40xx/chromium`) cross-compilation
+failure `saadway.h:31:10: fatal error: libuci.h: No such file or directory`.
+
+**Upstream facts (openwrt/openwrt@main, fetched for this task):**
+- `include/package-defaults.mk` → `MAKE_VARS` passes
+  `CFLAGS="$(TARGET_CFLAGS) $(EXTRA_CFLAGS) $(TARGET_CPPFLAGS) $(EXTRA_CPPFLAGS)"`,
+  and `MAKE_FLAGS` passes `CROSS="$(TARGET_CROSS)"` — but the default
+  `Build/Compile` passes **no `CC`**.
+- `include/toplevel.mk` force-clears `CFLAGS`/`LDFLAGS` in the environment
+  (`export CFLAGS=`, `export LDFLAGS=`).
+- Consequence for a delegated `src/Makefile` (Phase 13 structure): it must
+  (a) default to the **cross** compiler via `$(CROSS)gcc`, (b) honor **both**
+  `$(CFLAGS)` and `$(CPPFLAGS)`, and (c) obtain the target staging include
+  path through `TARGET_CPPFLAGS`, which upstream folds into `CFLAGS` — so no
+  custom `Build/Compile` block is required and the Phase 13 delegation
+  stays intact.
+
+- [ ] T060: Fix UCI include directive and propagate TARGET_CPPFLAGS (missing) per Constitution I (Native Platform Compliance — standard OpenWrt 25.12 headers and toolchain), Gate 1 (platform grep) and Gate 2 (footprint — no new dependency introduced), and docs/verify-2512.md §8 (build-time checks), §9 (dependency/asset audit), §10 (build-time record) — target files: `saadway/src/saadway.h`, `saadway/Makefile`, `saadway/src/Makefile`:
+  - `saadway/src/saadway.h:31` — replace `#include <libuci.h>` with `#include <uci.h>` (the header libuci actually installs; the DEV-ONLY declare-only stub pool named its header `libuci.h`, which is exactly why the host unit suite compiled while the SDK build failed). Re-audit every angle-bracket include against real OpenWrt header names — `<libubox/uloop.h>`, `<libubox/blobmsg.h>`, `<libubus.h>`, `<json-c/json.h>` are already correct and MUST stay unchanged.
+  - `saadway/Makefile` — export the target staging include path to the delegated sub-make: `TARGET_CPPFLAGS += -I$(STAGING_DIR)/usr/include` (upstream's default `Build/Compile` folds `TARGET_CPPFLAGS` into `CFLAGS`, so the Phase 13 "no custom `Build/Compile`" decision is preserved); no `DEPENDS` change (staging headers arrive only from already-declared `+libuci`, `+libubox`, `+libubus`, `+libjson-c`).
+  - `saadway/src/Makefile` — use the cross toolchain and both flag variables: `CC ?= $(CROSS)gcc` (upstream passes `CROSS` but not `CC`; without this the host `cc` compiles the package and no target header/sysroot is visible) and compile via `$(CC) $(CFLAGS) $(CPPFLAGS) -std=c11 -I. -c -o $@ $<` so the staging path (delivered through `CFLAGS`) and any explicit `CPPFLAGS` both apply; keep every `?=` default so SDK-supplied values still win, and keep the link rule/libs unchanged.
+  - DEV-ONLY host shim pool (`/tmp/opencode/swstubs`, never shipped): provide the stub under the real name `uci.h` (same declarations as today's `libuci.h`) so the unit suite keeps compiling after the include rename, and update the `saadway/src/unit/Makefile` header comment that names the old stub — the shim pool must mirror the REAL OpenWrt header names from now on.
+  - Verification per docs/verify-2512.md: (i) `gcc -fsyntax-only` over all 13 modules against the dev stub headers; (ii) `make -C saadway/src -n` shows the cross compiler plus `-I$(STAGING_DIR)/usr/include` on the compile line; (iii) unit suite `make check` still 21/21; (iv) authoritative proof — a real SDK `make package/saadway/{clean,compile}` on `ipq40xx/chromium`, recorded in docs/verify-2512.md §10 together with the upstream facts cited above and folded into the T046 on-device round.
+
+**Checkpoint**: the 25.12 SDK build compiles and links `saadway` with no header-resolution error; no new runtime dependency; host unit suite unchanged.
