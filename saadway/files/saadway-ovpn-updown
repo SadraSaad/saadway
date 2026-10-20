@@ -1,0 +1,75 @@
+#!/bin/sh
+# saadway-ovpn-updown — OpenVPN client up/down hook glue (T012/T020)
+#
+# Invoked by saadwayd via:
+#   openvpn ... --up /usr/libexec/saadway/ovpn-updown \
+#               --down /usr/libexec/saadway/ovpn-updown \
+#               --script-security 2 --setenv=SAADWAY_PROFILE,<name>
+#
+# Task (research D5 nuance / FR-013): export the tunnel-advertised DNS
+# servers (dhcp-option DNS handed over as foreign_option_N= env entries)
+# into
+#   /var/run/saadway/openvpn-<profile>.dns     format: one "dns=<ip>" line
+# The daemon (src/main.c sw_dnsfile_check) watches that directory with an
+# mtime+size guard and re-renders the tunnel-resolver dnsmasq instance only
+# on ACTUAL changes — no dnsmasq churn per openvpn event.
+#
+# Constitution Principle I: pure file glue (openvpn tun-up events only).
+# Principle IV: no secrets are handled here (arguments are daemon-rendered
+# interface names), output files are 0600 in a root-only run directory and
+# nothing is echoed to any log.
+
+# The up/down environment (foreign_option_N, script_type) is provided by
+# the OpenVPN process env at hook time — invisible to static analysis
+# (shellcheck disable justified here, verified against
+# https://openvpn.net/community-resources/using-openvpn-with-scripts/
+# script-interface env contract).
+# shellcheck disable=SC2154
+
+RUNDIR="${SAADWAY_RUNDIR:-/var/run/saadway}"
+PROFILE="${SAADWAY_PROFILE:-}"
+
+[ -n "$PROFILE" ] && [ -d "$RUNDIR" ] || exit 0
+
+# shell-guard the name: no path separators/globs (the daemon validated it,
+# but the hook must never trust the environment blindly)
+case "$PROFILE" in
+	*[!A-Za-z0-9_.-]*) exit 0 ;;
+esac
+
+out="$RUNDIR/openvpn-$PROFILE.dns"
+tmp="$out.new"
+trap 'rm -f "$tmp"' EXIT INT TERM
+
+: > "$tmp"
+
+# Collect up to 4 plain IPv4 resolvers (matches the daemon cap in
+# dns.c SW_DNS_UPSTREAM_MAX and its re-validation on load).
+count=0
+i=1
+while [ $i -lt 20 ] && [ "$count" -lt 4 ]; do
+	eval "opt=\${foreign_option_$i:-}"
+	case "$opt" in
+		"dhcp-option DNS "*)
+			ip=${opt#"dhcp-option DNS "}
+			case "$ip" in
+				""|*[!0-9.]*) ;;           # empty or non-IPv4 → skip
+				*)
+					printf 'dns=%s\n' "$ip" >> "$tmp"
+					count=$((count + 1))
+					;;
+			esac
+			;;
+	esac
+	i=$((i + 1))
+done
+
+# on down: publish an empty file → daemon falls back to its anycast
+# default for the teardown window instead of keeping stale resolvers
+if [ "$script_type" = "down" ]; then
+	: > "$tmp"
+fi
+
+chmod 0600 "$tmp"
+mv "$tmp" "$out"        # atomic publish; daemon polls mtime+size
+exit 0

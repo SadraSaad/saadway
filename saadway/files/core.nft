@@ -1,0 +1,74 @@
+# ============================================================================
+# SaadWay nftables design-reference skeleton (T010) — NOT applied at runtime.
+#
+# This file documents the structure; saadwayd never loads it via fw4/include
+# (see docs/verify-2512.md T-verify-3: the runtime table `table inet saadway`
+# is rendered by src/policy.c and applied as ONE atomic `nft -f` transaction
+# to /var/run/saadway/policy.nft — constitution Principle IV: no window of
+# partial state). Keep it in sync with policy.c when the skeleton evolves.
+# The rendered file follows this exact skeleton for the `table inet saadway`:
+#
+#   mark classes : 0x01 device-direct, 0x02 domain-bypass, 0x04 range-bypass,
+#                  0x08 tunnel-default   (mask 0xF)
+#   tables       : 201 = tunnel egress, 202 = direct/WAN (untouched default)
+#   ip rules prio: 7000 device > 7100 domain > 7200 range > 7300 tunnel > 7900 LAN-default
+#
+# Design note (verify task T-verify-3): this table is INDEPENDENT of fw4's
+# `table inet fw4`. saadwayd owns it exclusively and re-renders it whole with
+#   delete table inet saadway
+#   table inet saadway { ... }
+# inside a single transaction; fw4 never deletes foreign tables, so fw4
+# reloads coexist. The daemon re-applies policy after fw4 restarts via its
+# housekeeping tick for belt-and-suspenders consistency.
+# ============================================================================
+
+table inet saadway {
+
+	# --- named sets -----------------------------------------------------
+	# populated dynamically by dnsmasq `nftset=/domain/4#inet#saadway#…`:
+	set bypass_domains {
+		type ipv4_addr
+		flags dynamic,timeout
+	}
+	# rebuilt inside every atomic transaction from the bundled CIDR file:
+	set bypass_ranges {
+		type ipv4_addr
+		flags interval
+	}
+
+	# --- marking (prerouting, mangle stage) ------------------------------
+	chain mark_prerouting {
+		type filter hook prerouting priority mangle; policy accept;
+		jump mark_rules
+		iifname != "lo" meta mark set 0x08
+	}
+
+	chain mark_rules {
+		# <-- T018/T023: device-direct / domain / range / tunnel rules
+	}
+
+	# --- forced-tunnel DNS (T020) ----------------------------------------
+	chain dns_redirect {
+		type filter hook prerouting priority dstnat; policy accept;
+		# <-- T020/T026: UDP/TCP dport 53 of non-device-direct LAN clients
+		#     redirected to 5353 (tunnel dnsmasq instance)
+	}
+
+	# --- containment / tunnel-permit enforcement (T018) ------------------
+	chain contain {
+		type filter hook forward priority filter - 1; policy accept;
+		# <-- T018: meta mark 0x08 oifname != "<tunnel>" drop
+		# <-- T018: oifname "<tunnel>" ct state new drop (while unverified)
+	}
+
+	# --- output marking (router-local policies) ---------------------------
+	chain mark_output {
+		type filter hook output priority mangle; policy accept;
+		# router-local traffic stays unmarked → main table (direct);
+		# health probes bind the tunnel interface directly instead.
+	}
+}
+
+# --- routing prerequisites (rendered per state by policy.c, not here) ----
+# ip route replace blackhole default table 201      (containment state)
+# ip route replace default dev <tunX> table 201     (tunnel verified state)

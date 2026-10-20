@@ -1,0 +1,130 @@
+/home/sadra/saadway
+├── .specify
+│   ├── .gitignore
+│   ├── feature.json
+│   ├── init-options.json
+│   ├── integration.json
+│   ├── integrations
+│   │   ├── opencode.manifest.json
+│   │   └── speckit.manifest.json
+│   ├── memory
+│   │   ├── .constitution-template.json
+│   │   └── constitution.md
+│   ├── scripts
+│   │   └── bash
+│   │       ├── check-prerequisites.sh
+│   │       ├── common.sh
+│   │       ├── create-new-feature.sh
+│   │       ├── resolve-template.sh
+│   │       ├── setup-plan.sh
+│   │       └── setup-tasks.sh
+│   ├── templates
+│   │   ├── checklist-template.md
+│   │   ├── constitution-template.md
+│   │   ├── plan-template.md
+│   │   ├── spec-template.md
+│   │   └── tasks-template.md
+│   └── workflows
+│       ├── speckit
+│       │   └── workflow.yml
+│       └── workflow-registry.json
+├── docs
+│   └── verify-2512.md
+├── luci-app-saadway
+│   ├── Makefile
+│   ├── htdocs
+│   │   └── luci-static
+│   │       └── resources
+│   │           └── view
+│   │               └── saadway
+│   │                   └── dashboard.js
+│   └── root
+│       └── usr
+│           └── share
+│               └── rpcd
+│                   └── acl.d
+│                       └── luci-app-saadway.json
+├── saadway
+│   ├── Makefile
+│   ├── files
+│   │   ├── bypass-cidr.txt
+│   │   ├── core.nft
+│   │   ├── htdocs
+│   │   │   └── saadway
+│   │   │       ├── css
+│   │   │       │   └── base.css
+│   │   │       ├── i18n
+│   │   │       │   ├── en.json
+│   │   │       │   └── fa.json
+│   │   │       ├── index.html
+│   │   │       └── js
+│   │   │           ├── api.js
+│   │   │           ├── app.js
+│   │   │           ├── chart.js
+│   │   │           └── i18n.js
+│   │   ├── rpc-acl.json
+│   │   ├── saadway-ovpn-updown
+│   │   ├── saadway-provision
+│   │   ├── saadway.conf
+│   │   ├── saadway.init
+│   │   ├── secrets
+│   │   └── uci-defaults
+│   │       ├── 40-saadway-uhttpd
+│   │       └── 50-saadway-rpcd
+│   └── src
+│       ├── backup.c
+│       ├── backup.o
+│       ├── counters.c
+│       ├── dns.c
+│       ├── dns.o
+│       ├── failover.c
+│       ├── failover.o
+│       ├── health.c
+│       ├── log.c
+│       ├── log.o
+│       ├── main.c
+│       ├── policy.c
+│       ├── policy.o
+│       ├── saadway.h
+│       ├── steering.c
+│       ├── steering.o
+│       ├── tunnel-ikev2.c
+│       ├── tunnel-ikev2.o
+│       ├── tunnel-openvpn.c
+│       ├── tunnel-openvpn.o
+│       ├── ubus.c
+│       ├── uci-state.c
+│       ├── uci-state.o
+│       └── unit
+│           ├── Makefile
+│           ├── README.md
+│           ├── shim_uci.c
+│           ├── test-stubs.c
+│           ├── test_backup_codec
+│           ├── test_backup_codec.c
+│           ├── test_failover
+│           ├── test_failover.c
+│           ├── test_policy_render
+│           ├── test_policy_render.c
+│           ├── test_steer_order
+│           └── test_steer_order.c
+├── specs
+│   └── 001-saadway-vpn-dashboard
+│       ├── checklists
+│       │   └── requirements.md
+│       ├── contracts
+│       │   ├── api.md
+│       │   ├── backup-schema.json
+│       │   └── uci.md
+│       ├── data-model.md
+│       ├── plan.md
+│       ├── quickstart.md
+│       ├── research.md
+│       ├── spec.md
+│       └── tasks.md
+└── tests
+    ├── leak-check.sh
+    ├── restore-roundtrip.sh
+    └── smoke-container.sh
+
+37 directories, 91 files

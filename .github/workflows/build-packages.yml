@@ -1,0 +1,75 @@
+name: Build OpenWrt Packages (Google Wifi 1304)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Packages for ipq40xx/chromium
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison gawk gcc-multilib g++-multilib \
+            gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
+            file wget zstd curl
+
+      - name: Setup OpenWrt SDK
+        run: |
+          SDK_URL_DIR="https://downloads.openwrt.org/releases/25.12.0/targets/ipq40xx/chromium"
+          
+          # دریافت نام دقیق فایل SDK برای تارگت ipq40xx/chromium
+          SDK_FILE=$(curl -sL "${SDK_URL_DIR}/sha256sums" | grep -o 'openwrt-sdk-.*-ipq40xx-chromium.*\.tar\.zst' | head -n 1)
+          
+          if [ -z "$SDK_FILE" ]; then
+            echo "SDK release not found, falling back to snapshots..."
+            SDK_URL_DIR="https://downloads.openwrt.org/snapshots/targets/ipq40xx/chromium"
+            SDK_FILE=$(curl -sL "${SDK_URL_DIR}/sha256sums" | grep -o 'openwrt-sdk-.*-ipq40xx-chromium.*\.tar\.zst' | head -n 1)
+          fi
+          
+          echo "Downloading SDK: $SDK_FILE"
+          wget -q "${SDK_URL_DIR}/${SDK_FILE}"
+          tar --zstd -xf "$SDK_FILE"
+          rm -f "$SDK_FILE"
+          mv openwrt-sdk-* sdk
+
+      - name: Prepare Feeds and Copy Packages
+        run: |
+          cd sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          
+          # انتقال پکیج‌های saadway و luci-app-saadway به درخت بیلد SDK
+          cp -r ../saadway package/
+          cp -r ../luci-app-saadway package/
+          
+          # حذف باینری‌های احتمالی و تنظیم بیلد پکیج‌ها
+          rm -f package/saadway/src/*.o
+          echo "CONFIG_PACKAGE_saadway=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-saadway=m" >> .config
+          make defconfig
+
+      - name: Compile Packages
+        run: |
+          cd sdk
+          make package/saadway/compile V=s -j$(nproc)
+          make package/luci-app-saadway/compile V=s -j$(nproc)
+
+      - name: Collect Artifacts
+        run: |
+          mkdir -p output
+          find sdk/bin/ -type f \( -name "saadway*" -o -name "luci-app-saadway*" \) \( -name "*.ipk" -o -name "*.apk" \) -exec cp {} output/ \;
+
+      - name: Upload Built Packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-wifi-packages-ipq40xx
+          path: output/
+          retention-days: 7

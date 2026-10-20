@@ -1,0 +1,48 @@
+{
+	"saadway": {
+		"description": "SaadWay dashboard RPC surface (Principle V: authenticated LAN sessions only; least privilege — strictly the saadway.* object methods, nothing system-wide). Attached to the 'saadway-admin' login via /etc/config/rpcd 'list read saadway'/'list write saadway' (uci-defaults/50-saadway-rpcd). Root sessions map LuCI's own trust path and are not further restricted here.",
+		"read": {
+			"ubus": {
+				"saadway": [
+					"mgmt.status",
+					"profile.list",
+					"steer.list",
+					"sec.status",
+					"sec.dns.status",
+					"mon.stats",
+					"mon.logs"
+				]
+			}
+		},
+		"write": {
+			"ubus": {
+				"saadway": [
+					"mgmt.status",
+					"mgmt.set",
+					"profile.list",
+					"profile.import_openvpn",
+					"profile.create_ikev2",
+					"profile.update",
+					"profile.delete",
+					"profile.activate",
+					"profile.deactivate",
+					"steer.list",
+					"steer.domain.add",
+					"steer.domain.remove",
+					"steer.device.set",
+					"steer.device.remove",
+					"steer.iprange.set",
+					"sec.status",
+					"sec.kill_switch.set",
+					"sec.dns.status",
+					"mon.health_test",
+					"mon.stats",
+					"mon.logs",
+					"maint.backup.export",
+					"maint.backup.import",
+					"maint.cooldown.set"
+				]
+			}
+		}
+	}
+}

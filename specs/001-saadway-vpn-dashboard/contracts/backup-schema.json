@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "saadway:backup:v1",
+  "title": "SaadWay Backup/Restore Schema v1",
+  "type": "object",
+  "required": ["schema_version", "created", "profiles", "steering", "service"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "created": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "model": { "type": "string" },
+        "firmware": { "type": "string" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "active_profile": { "type": ["string", "null"] },
+        "kill_switch": { "type": "boolean" },
+        "failover_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "failover_cooldown": { "type": "integer", "minimum": 30, "maximum": 86400 },
+        "probe_interval": { "type": "integer", "minimum": 5 },
+        "stats_interval": { "type": "integer", "minimum": 1 },
+        "iprange_bypass": { "type": "boolean" },
+        "dashboard": {
+          "type": "object",
+          "properties": {
+            "language": { "enum": ["fa", "en"] },
+            "session_timeout": { "type": "integer", "minimum": 300 }
+          }
+        }
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "enabled", "order"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "kind": { "enum": ["openvpn", "ikev2"] },
+          "enabled": { "type": "boolean" },
+          "order": { "type": "integer", "minimum": 1 },
+          "credentials": {
+            "description": "Present when exported with include_credentials=true; import marks depends_on_secret items as restored only when present.",
+            "type": ["object", "null"],
+            "properties": {
+              "username": { "type": "string" },
+              "password": { "type": "string" }
+            }
+          },
+          "openvpn": {
+            "description": "opens side of an openvpn profile: normalized ovpn text + optional auth-user-pass credentials",
+            "type": ["object", "null"],
+            "properties": {
+              "ovpn_text": { "type": "string" }
+            }
+          },
+          "ikev2": {
+            "type": ["object", "null"],
+            "properties": {
+              "hostname": { "type": "string", "format": "idn-hostname" },
+              "username": { "type": "string" },
+              "remote_id": { "type": "string" },
+              "local_id": { "type": "string" },
+              "cert_mode": { "const": "from-server" },
+              "proxy": { "const": "off" },
+              "proposal_ike": { "type": "string" },
+              "proposal_esp": { "type": "string" }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "openvpn" } } },
+            "then": { "required": ["openvpn"] }
+          },
+          {
+            "if": { "properties": { "kind": { "const": "ikev2" } } },
+            "then": { "required": ["ikev2"] }
+          }
+        ]
+      }
+    },
+    "steering": {
+      "type": "object",
+      "properties": {
+        "domains": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "type": "string" },
+          "description": "unique, case-insensitive dedup enforced at import"
+        },
+        "devices": {
+          "type": "array",
+          "maxItems": 253,
+          "items": {
+            "type": "object",
+            "required": ["match_type", "match_value", "policy"],
+            "properties": {
+              "match_type": { "enum": ["ip", "mac"] },
+              "match_value": { "type": "string" },
+              "policy": { "enum": ["direct", "tunneled"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

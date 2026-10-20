@@ -1,0 +1,123 @@
+#!/bin/sh
+# saadway-provision — dedicated dashboard user provisioning (T028/T032, FR-020)
+#
+# Installs to /usr/libexec/saadway/provision. Run over SSH:
+#
+#   /usr/libexec/saadway/provision set      # interactive: set dashboard password
+#   /usr/libexec/saadway/provision unset    # remove the dashboard user
+#
+# Design (verified against rpcd source, docs/verify-2512.md T-verify-5):
+# rpcd's session.login tests /etc/config/rpcd 'config login' sections with
+# crypt(3); '$p$<user>' delegates the hash lookup to /etc/shadow (a 0600
+# file). We therefore provision a system user 'saadway-admin' (nologin shell,
+# no home write access) whose hash lives ONLY in /etc/shadow — never in
+# world-readable UCI options (Principle IV). The rpcd login section mapping
+# the user to the least-privilege 'saadway' ACL group ships via
+# /etc/uci-defaults/50-saadway-rpcd.
+
+set -u
+
+USER=saadway-admin
+PASSWD=/etc/passwd
+SHADOW=/etc/shadow
+UID_DASH=${SAADWAY_DASH_UID:-355}
+GID_DASH=${SAADWAY_DASH_GID:-355}
+
+fail() {
+	echo "provision: $1" >&2
+	exit 1
+}
+
+user_exists() {
+	grep -qs "^${USER}:" "$PASSWD"
+}
+
+shadow_exists() {
+	grep -qs "^${USER}:" "$SHADOW"
+}
+
+# /etc/passwd line: shell /bin/false, crypt placeholder x in shadow form:
+# user:x:uid:gid:comment:home:shell  (home /var is world-writable tmp)
+do_add() {
+	user_exists && shadow_exists && { echo "provision: '$USER' already provisioned"; return 0; }
+
+	command -v addgroup >/dev/null 2>&1 || \
+		fail "busybox addgroup not present; provisioning unavailable"
+	addgroup -g "$GID_DASH" saadway 2>/dev/null || true
+
+	if ! user_exists; then
+		adduser -D -u "$UID_DASH" -G saadway -h /var -s /bin/false \
+			-g "SaadWay dashboard" "$USER" 2>/dev/null \
+		|| do_add_by_file
+	fi
+	shadow_exists && { echo "provision: '$USER' already provisioned"; return 0; }
+
+	# busybox adduser sometimes writes a shadow-less passwd:x form only;
+	# guarantee the /etc/shadow row so rpcd's getspnam finds a hash slot.
+	if ! shadow_exists; then
+		cp "$SHADOW" "$SHADOW.saadway.tmp" 2>/dev/null || fail "cannot stage $SHADOW"
+		printf '%s:x:0:0:99999:7:::\n' "$USER" >> "$SHADOW.saadway.tmp" || fail "shadow append failed"
+		chmod 0600 "$SHADOW.saadway.tmp"
+		# busybox shadow has no selinux attrs to preserve; plain mv
+		mv "$SHADOW.saadway.tmp" "$SHADOW" || fail "shadow replace failed"
+	fi
+}
+
+# fallback when busybox adduser is not compiled in: append the passwd rows
+# directly (uid/gid from the constants above)
+do_add_by_file() {
+	grep -qs "^${USER}:" "$PASSWD" && return 0
+	echo "${USER}:x:${UID_DASH}:${GID_DASH}:SaadWay dashboard:/var:/bin/false" \
+		>> "$PASSWD" || fail "passwd append failed"
+	return 0
+}
+
+do_del() {
+	user_exists || { echo "provision: '$USER' not provisioned"; return 0; }
+
+	command -v deluser >/dev/null 2>&1 && deluser --remove-home=no "$USER" 2>/dev/null
+	# guarantee removal from both files with atomic staged rewrites
+	if user_exists; then
+		cp "$PASSWD" "$PASSWD.tmp.$$" || fail "cannot stage $PASSWD"
+		grep -v "^${USER}:" "$PASSWD" > "$PASSWD.tmp.$$"
+		mv "$PASSWD.tmp.$$" "$PASSWD" || fail "passwd replace failed"
+	fi
+	if shadow_exists; then
+		cp "$SHADOW" "$SHADOW.tmp.$$" || fail "cannot stage $SHADOW"
+		grep -v "^${USER}:" "$SHADOW" > "$SHADOW.tmp.$$"
+		chmod 0600 "$SHADOW.tmp.$$"
+		mv "$SHADOW.tmp.$$" "$SHADOW" || fail "shadow replace failed"
+	fi
+	delgroup saadway 2>/dev/null || true
+	echo "provision: passwd/shadow rows for '$USER' removed"
+}
+
+restart_rpcd() {
+	if [ -x /etc/init.d/rpcd ] && /etc/init.d/rpcd enabled; then
+		/etc/init.d/rpcd restart && echo "provision: rpcd reloaded" \
+			|| echo "provision: rpcd restart FAILED; run manually" >&2
+	fi
+}
+
+# ---------------------------------------------------------------------------
+
+umask 077
+
+case "${1:-set}" in
+	set)
+		do_add
+		# busybox passwd handles the interactive hash materialization
+		# (writes crypt(3) into /etc/shadow; hashes never touch stdout).
+		passwd "$USER" || fail "password assignment failed"
+		restart_rpcd
+		echo "provision: dashboard login '$USER' ready (ACL group: saadway)"
+		;;
+	unset)
+		do_del
+		restart_rpcd
+		;;
+	*)
+		echo "usage: $0 {set|unset}" >&2
+		exit 2
+		;;
+esac
