@@ -1,0 +1,42 @@
+# procd-exported-helpers.txt — the complete procd_* helper API of OpenWrt
+# 25.12, extracted verbatim from the upstream export list:
+#   openwrt/openwrt  package/system/procd/files/procd.sh
+#   (the `_procd_wrapper` export block; the file is installed as
+#    /lib/functions/procd.sh and sourced by /etc/rc.common)
+#
+# Dev-time fixture only (T070): never installed on a device, never used at
+# runtime. It exists so the service-startup audit can prove that the init
+# script calls only helpers upstream actually exports.
+#
+# NOTE: procd_add_restart_trigger is deliberately ABSENT — upstream does
+# not export it. Calling it produced
+#   "procd: /etc/rc.d/S99saadway: line 45: procd_add_restart_trigger: not found"
+# (the replacement is procd_add_reload_trigger).
+procd_add_action_mount_trigger
+procd_add_config_trigger
+procd_add_instance
+procd_add_interface_trigger
+procd_add_jail
+procd_add_jail_mount
+procd_add_jail_mount_rw
+procd_add_mount_trigger
+procd_add_raw_trigger
+procd_add_reload_data_trigger
+procd_add_reload_interface_trigger
+procd_add_reload_mount_trigger
+procd_add_reload_trigger
+procd_add_restart_mount_trigger
+procd_add_validation
+procd_append_param
+procd_close_instance
+procd_close_service
+procd_close_trigger
+procd_close_validate
+procd_kill
+procd_open_instance
+procd_open_service
+procd_open_trigger
+procd_open_validate
+procd_send_signal
+procd_set_config_changed
+procd_set_param

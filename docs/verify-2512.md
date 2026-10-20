@@ -550,6 +550,56 @@ suite must be re-run against the **corrected** stub; the authoritative
   `http://<lan-ip>/saadway/`) is folded into the T046/T057 round and
   quickstart Scenario 4 step 5.
 
+* **ubus socket + procd trigger contract (upstream facts for Phase 21 /
+  T069).** `openwrt/ubus@master` → `CMakeLists.txt`:
+  `SET(UBUS_UNIX_SOCKET "/var/run/ubus/ubus.sock")` (+ `ADD_DEFINITIONS
+  (-DUBUS_UNIX_SOCKET=…)`), and `libubus-io.c` → `ubus_reconnect()`:
+  `if (!path) path = UBUS_UNIX_SOCKET;` → **`ubus_connect(NULL)` resolves
+  the system socket**. `UBUS_UNIX_SOCKET` is a library-internal
+  compile-time constant (it is in no public header) → a client cannot
+  reference it, so a client-side copy of the path is a second source of
+  truth. `openwrt/openwrt@master` →
+  `package/system/procd/files/procd.sh` (installed as
+  `/lib/functions/procd.sh`): the `_procd_wrapper` export block IS the
+  definitive `procd_*` API surface — it exports `procd_add_reload_trigger`,
+  `procd_add_reload_data_trigger`, `procd_add_reload_interface_trigger`,
+  `procd_add_reload_mount_trigger`, `procd_add_restart_mount_trigger`,
+  `procd_add_raw_trigger`, `procd_add_config_trigger` … but **no**
+  `procd_add_restart_trigger`; `_procd_add_reload_trigger()` adds a
+  `config.change` trigger on the named config file →
+  `/etc/init.d/<service> reload`, i.e. a RELOAD (SIGHUP) trigger.
+  `procd_set_param` has no `depends` key → upstream offers no "wait for
+  ubus" parameter; the boot-order race is covered by the respawn policy
+  already set in `start_service()` (`respawn 3600 5 5`).
+* **Phase 21 / T069 applied.** `saadway/src/saadway.h` no longer defines
+  `SW_UBUS_SOCK` (the pre-21.02 path `/var/run/ubus.sock`; the stock
+  25.12 socket lives in `/var/run/ubus/ubus.sock`) — a comment records
+  why the daemon must not carry its own copy of the path.
+  `saadway/src/main.c` now connects with `ubus_connect(NULL)` so libubus
+  resolves the system socket, and the fail-closed error message no longer
+  interpolates a path it does not know (`cannot connect ubus: %s`).
+  `saadway/files/saadway.init:45` replaced the non-existent
+  `procd_add_restart_trigger "network"` with
+  `procd_add_reload_trigger "network"` → a `config.change` on
+  `/etc/config/network` now runs `/etc/init.d/saadway reload` → the
+  daemon's SIGHUP handler re-reads UCI and re-applies the policy
+  atomically (no tunnel drop) — the intent the original comment
+  described. Everything else in the init script (START/STOP, USE_PROCD,
+  the respawn policy, `reload_signal SIGHUP`, the two existing reload
+  triggers) is unchanged. `tests/service-startup-audit.sh` (T070) proves
+  both halves offline: every `procd_*` call in the init script must be in
+  the upstream exported set (`tests/fixtures/procd-exported-helpers.txt`,
+  28 helpers), and the daemon sources must carry no hardcoded socket
+  path — comments are stripped before both checks. Against the pre-fix
+  snapshot it reports `procd_add_restart_trigger is NOT exported
+  upstream` plus the two files with the hardcoded path (3 findings);
+  against the fixed tree it is clean. Host-side validation:
+  `tests/link-audit.sh` green (13 modules), the unit suite 21/21, both
+  new audits green, shellcheck clean. The on-device proof (no
+  "cannot connect ubus" in `logread`, `ubus list | grep saadway` shows
+  the object, `ubus call saadway mgmt.status` answers) is folded into the
+  T046/T057 round and quickstart Scenario 1 step 4.
+
 ## 9. Footprint pointers → T045
 
 * Zero references to iptables/ipset/fw3 in the whole tree (Gate 1/2) —

@@ -56,6 +56,13 @@ of inactivity. Alternative mode: set
    shows `connection_status=up`, `active_profile` matches, and an L3
    interface exists (`ip link show type tun` / `type xfrm`) — Gate 4.
    Expect elapsed < 10 000 ms (SC-001).
+4. Verify the service itself came up on the stock image: `logread | grep
+   -i saadway` contains no "cannot connect ubus" line (the daemon must
+   resolve the ubus socket through libubus, not a hardcoded path),
+   `ubus list | grep saadway` shows the `saadway` ubus object, and
+   `/etc/init.d/saadway start` logs no "not found" from
+   `/etc/rc.d/S99saadway` (the init script may only call procd helpers
+   upstream exports).
 
 ## Scenario 2 — Zero-leak under switch & drop (Story 2; Gate 5)
 

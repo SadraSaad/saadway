@@ -588,10 +588,11 @@ int main(void)
 	signal(SIGPIPE, SIG_IGN);
 
 	/* ubus wiring: single client context, object registered          */
-	c->ubus = ubus_connect(SW_UBUS_SOCK);
+	/* T069: NULL -> libubus resolves the system socket itself (the    */
+	/* socket path is a library-internal detail, never a client copy)  */
+	c->ubus = ubus_connect(NULL);
 	if (!c->ubus) {
-		sw_err("cannot connect ubus at %s: %s", SW_UBUS_SOCK,
-		       strerror(errno));
+		sw_err("cannot connect ubus: %s", strerror(errno));
 		return 1;
 	}
 	uloop_init();

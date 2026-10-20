@@ -42,5 +42,11 @@ service_triggers() {
 	# re-asserts on its own housekeeping tick).
 	procd_add_reload_trigger "firewall"
 	procd_add_reload_trigger "saadway"
-	procd_add_restart_trigger "network"
+	# T069: procd_add_restart_trigger does not exist upstream — the
+	# exported helper set has procd_add_reload_trigger (and its
+	# data/interface/mount variants) only. The reload trigger is also
+	# the correct semantic: a config.change on /etc/config/network
+	# -> /etc/init.d/saadway reload -> the daemon's SIGHUP handler
+	# re-reads UCI and re-applies the policy atomically (no tunnel drop).
+	procd_add_reload_trigger "network"
 }

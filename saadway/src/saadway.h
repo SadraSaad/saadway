@@ -48,7 +48,11 @@
 #define SW_SWANCTL_CONF   "/etc/saadway/swanctl/swanctl.conf"
 #define SW_NFT_BIN        "/usr/sbin/nft"
 #define SW_IP_BIN         "/usr/sbin/ip"
-#define SW_UBUS_SOCK      "/var/run/ubus.sock"
+/* T069: no ubus socket path here - libubus resolves the system socket
+ * (ubus_connect(NULL) -> the library's own UBUS_UNIX_SOCKET default).
+ * A client-side copy of the path is a second source of truth and it went
+ * stale before (pre-21.02 layout); the reasoning and the upstream
+ * sources are recorded in docs/verify-2512.md section 8. */
 
 /* ------------------------------------------------------------------ */
 /* Explicit timeout table (research.md D2; UCI-overridable where noted) */
