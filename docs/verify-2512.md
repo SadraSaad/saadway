@@ -502,6 +502,54 @@ suite must be re-run against the **corrected** stub; the authoritative
   file-only package without the empty build blocks is reported as
   `Build/Compile is 'undefined' (must be an empty block)`.
 
+* **uhttpd listener address contract (upstream facts for Phase 20 /
+  T066).** `openwrt/uhttpd@master` → `listen.c` → `uh_socket_bind()`
+  resolves the listener host with `getaddrinfo(host, port, &hints, &addrs)`
+  and, on failure, prints `getaddrinfo(): %s` (`gai_strerror()`) and
+  returns 0 — no socket is bound, so the dashboard and its `/ubus`
+  transport are unreachable. `openwrt/openwrt@master` →
+  `package/network/services/uhttpd/files/uhttpd.config` holds FOUR
+  wildcard entries (`list listen_http 0.0.0.0:80`, `list listen_http
+  [::]:80` and the two https equivalents) and `.../uhttpd.init` turns
+  EVERY list entry into one `-p <host:port>` argument
+  (`config_get http "$cfg" listen_http` + `for listen in $http`).
+  `openwrt/netifd@master` → `ubus.c` → `interface_ip_dump_address_list()`
+  reports each address as an OBJECT (`"address"` written with
+  `inet_ntop()`, i.e. bare, plus a separate `"mask"` field) — so
+  `jsonfilter -e '@.ipv4-address[0]'` prints the object's JSON text and
+  the leaf must be selected: `@["ipv4-address"][0].address`.
+  `openwrt/jsonpath@master` (the `jsonfilter` implementation) prints a
+  matched STRING raw and a matched OBJECT as its JSON text.
+  `openwrt/uci@master` → `list.c` → `uci_add_list()` APPENDS to an
+  existing list (and CONVERTS a string option into a two-element list),
+  and `cli.c` → `uci_batch()` keeps going after a failing command.
+* **Phase 20 / T066 applied.** `saadway/files/uci-defaults/40-saadway-uhttpd`
+  now (i) selects the address leaf explicitly
+  (`jsonfilter -e '@["ipv4-address"][0].address'`), (ii) strips any CIDR
+  mask (`LAN_IP="${LANADDR%%/*}"`), (iii) accepts the value only when it
+  is a bare IPv4 literal — four decimal octets, each 0-255 — and
+  otherwise leaves the stock listener configuration untouched (fail-safe:
+  never write a value that can take uhttpd down), (iv) deletes the
+  wildcard entries before adding the LAN listeners
+  (`delete uhttpd.main.listen_http` + `add_list …='<LAN_IP>:80'`, same
+  for https) so uhttpd cannot keep listening on every interface, and
+  (v) commits the change (`uci -q commit uhttpd`) — `uci batch` alone
+  writes only the `/tmp/.uci` delta, so the binding would be lost on the
+  next reboot. The upgrade repair path: the script is installed with
+  `$(CP) ./files/uci-defaults/* $(1)/etc/uci-defaults/` (not a conffile),
+  so a package upgrade re-installs it and `/etc/init.d/boot` re-runs it
+  on the next boot → the stale `192.168.5.1/24:80` value is replaced.
+  `tests/uci-defaults-audit.sh` (T067) reproduces the failure offline: it
+  runs the script under a stub `uci`/`ubus`/`jsonfilter` PATH and asserts
+  the bare address, the CIDR strip, the "write nothing when unusable",
+  the delete-before-add_list order, the commit and the exit code — it
+  FAILS with 7 findings against the pre-fix snapshot
+  (`tests/fixtures/40-saadway-uhttpd.prefix`) and passes against the
+  shipped script. The on-device proof (`uci get uhttpd.main.listen_http`
+  → `<lan-ip>:80`, no `getaddrinfo()` in `logread`, the SPA reachable at
+  `http://<lan-ip>/saadway/`) is folded into the T046/T057 round and
+  quickstart Scenario 4 step 5.
+
 ## 9. Footprint pointers → T045
 
 * Zero references to iptables/ipset/fw3 in the whole tree (Gate 1/2) —
@@ -516,6 +564,19 @@ suite must be re-run against the **corrected** stub; the authoritative
   SPA docroot → `/www/saadway/`, uci-defaults `40-saadway-uhttpd` +
   `50-saadway-rpcd` → `/etc/uci-defaults/`. All referenced sources exist;
   the formerly empty `/etc/saadway/htdocs` install dir is removed.
+* uci-defaults assets (Phase 20 / T066): `40-saadway-uhttpd` →
+  `/etc/uci-defaults/` writes the uhttpd listener options. The listener
+  value is assembled ONLY from a validated bare IPv4 literal (four decimal
+  octets, 0-255): the address is stripped of any CIDR mask
+  (`LAN_IP="${LANADDR%%/*}"`) and rejected outright when it is not a bare
+  IPv4 — so no `/` can reach `uhttpd.main.listen_http` /
+  `uhttpd.main.listen_https` (uhttpd resolves the host with
+  `getaddrinfo()`; `192.168.5.1/24:80` made it abort the bind with
+  "getaddrinfo(): Name does not resolve"). The wildcards are deleted
+  before the LAN address is added (a bare `add_list` would APPEND to the
+  stock `0.0.0.0:80` / `[::]:80` entries and keep uhttpd listening on
+  every interface), and the change is committed (`uci batch` alone only
+  writes a /tmp delta). Enforced by `tests/uci-defaults-audit.sh` (T067).
 * LuCI app assets (`luci-app-saadway`, T064): the view
   `htdocs/luci-static/resources/view/saadway/dashboard.js` →
   `/www/luci-static/resources/view/saadway/`, the session ACL

@@ -12,27 +12,77 @@
 # Runs once at first boot (uci-defaults), before services are started.
 # Verification item (docs/verify-2512.md T-verify-1): confirm uhttpd-mod-ubus
 # auto-registration surface in OpenWrt 25.12 with the exact /ubus prefix.
+#
+# T066 (Phase 20): the listener host must be a BARE IPv4 literal. uhttpd
+# resolves it with getaddrinfo(), which treats the whole string as a host
+# name — "192.168.5.1/24" is not a host and made uhttpd abort the bind with
+# "getaddrinfo(): Name does not resolve", leaving the dashboard (and the
+# /ubus transport behind it) unreachable. The address is therefore stripped
+# of any CIDR mask, validated, and only then written.
 
 # Resolve the LAN address; uci-defaults may run before netifd is up, so try
 # ubus first and fall back to plain UCI text (first-boot safe).
 LANADDR=""
 if command -v ubus >/dev/null 2>&1; then
+	# netifd reports each address as an OBJECT — {"address":"192.168.5.1",
+	# "mask":24} — so the leaf must be selected explicitly: the bare
+	# '@.ipv4-address[0]' yields the object's JSON text, not an address.
 	LANADDR=$(ubus call network.interface.lan status 2>/dev/null \
-		| jsonfilter -e '@.ipv4-address[0]' 2>/dev/null)
+		| jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
 fi
 [ -n "$LANADDR" ] || LANADDR=$(uci get network.lan.ipaddr 2>/dev/null)
 
-if [ -z "$LANADDR" ]; then
-	# Nothing resolvable yet — keep the stock listener configuration;
+# Strip any CIDR mask (the UCI fallback yields "192.168.5.1/24" when the
+# LAN address is configured in prefix notation).
+LAN_IP="${LANADDR%%/*}"
+
+# Accept only a bare IPv4 literal: four decimal octets, each 0-255.
+# Anything else (empty, a hostname, the jsonfilter object text) leaves the
+# stock listener configuration untouched — uhttpd keeps serving and the
+# firewall's WAN input policy remains the network-layer guard (fail-safe:
+# never write a value that could take uhttpd down).
+is_ipv4() (
+	_saved_ifs=$IFS
+	IFS=.
+	# shellcheck disable=SC2086
+	set -- $1
+	IFS=$_saved_ifs
+	[ $# -eq 4 ] || exit 1
+	for _octet in "$@"; do
+		case "$_octet" in
+		'' | *[!0-9]*) exit 1 ;;
+		esac
+		[ "${#_octet}" -le 3 ] || exit 1
+		[ "$_octet" -le 255 ] || exit 1
+	done
+	exit 0
+)
+
+if ! is_ipv4 "$LAN_IP"; then
+	# Nothing usable yet — keep the stock listener configuration;
 	# the firewall's WAN input policy remains the network-layer guard
 	# (fail-safe, never fail open into a broken state).
 	exit 0
 fi
 
+# Nothing to wire if uhttpd is not installed on this image.
+uci -q get uhttpd.main >/dev/null 2>&1 || exit 0
+
+# LAN-only listeners. The stock config holds the wildcards
+# ("list listen_http 0.0.0.0:80", "list listen_http [::]:80" and the two
+# https equivalents), so the option is deleted first: uci_add_list APPENDS
+# to an existing list and would leave uhttpd listening on every interface
+# (WAN exposure — api.md non-goals, Constitution IV).
 uci -q batch <<EOF
-set uhttpd.main.listen_http='${LANADDR}:80'
-set uhttpd.main.listen_https='${LANADDR}:443'
+delete uhttpd.main.listen_http
+add_list uhttpd.main.listen_http='${LAN_IP}:80'
+delete uhttpd.main.listen_https
+add_list uhttpd.main.listen_https='${LAN_IP}:443'
 EOF
+
+# uci batch only writes the delta under /tmp/.uci (tmpfs) — without the
+# commit the LAN binding would be lost on the next reboot.
+uci -q commit uhttpd
 
 # reload uhttpd only when it is already running and enabled (upgrade path)
 if [ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd enabled; then

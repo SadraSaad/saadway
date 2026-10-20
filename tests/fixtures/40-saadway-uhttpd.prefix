@@ -1,0 +1,42 @@
+#!/bin/sh
+# 40-saadway-uhttpd — uhttpd wiring for the standalone dashboard (T032)
+#
+# - ensures the dashboard SPA (/www/saadway/) is served by the stock main
+#   uhttpd instance on the SAME origin as /ubus (uhttpd-mod-ubus auto-registers
+#   the /ubus JSON-RPC endpoint when installed — no extra option needed);
+# - binds uhttpd's listeners to the LAN address only (api.md non-goals:
+#   "No WAN exposure; uhttpd ACL binds to LAN interface only") as a
+#   defense-in-depth layer on top of the firewall's WAN input policy;
+# - does NOT touch certificates, redirect_https or LuCI's own paths.
+#
+# Runs once at first boot (uci-defaults), before services are started.
+# Verification item (docs/verify-2512.md T-verify-1): confirm uhttpd-mod-ubus
+# auto-registration surface in OpenWrt 25.12 with the exact /ubus prefix.
+
+# Resolve the LAN address; uci-defaults may run before netifd is up, so try
+# ubus first and fall back to plain UCI text (first-boot safe).
+LANADDR=""
+if command -v ubus >/dev/null 2>&1; then
+	LANADDR=$(ubus call network.interface.lan status 2>/dev/null \
+		| jsonfilter -e '@.ipv4-address[0]' 2>/dev/null)
+fi
+[ -n "$LANADDR" ] || LANADDR=$(uci get network.lan.ipaddr 2>/dev/null)
+
+if [ -z "$LANADDR" ]; then
+	# Nothing resolvable yet — keep the stock listener configuration;
+	# the firewall's WAN input policy remains the network-layer guard
+	# (fail-safe, never fail open into a broken state).
+	exit 0
+fi
+
+uci -q batch <<EOF
+set uhttpd.main.listen_http='${LANADDR}:80'
+set uhttpd.main.listen_https='${LANADDR}:443'
+EOF
+
+# reload uhttpd only when it is already running and enabled (upgrade path)
+if [ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd enabled; then
+	/etc/init.d/uhttpd restart >/dev/null 2>&1
+fi
+
+exit 0

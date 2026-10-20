@@ -96,6 +96,14 @@ of inactivity. Alternative mode: set
    `dashboard.session_timeout` of inactivity.
 4. Verify SPA is Persian RTL by default with fa/en switch; preference
    persists (FR-027).
+5. Verify the uhttpd listener the first-boot script wrote:
+   `uci get uhttpd.main.listen_http` must print `<lan-ip>:80` — a bare
+   `host:port`, never a CIDR (`192.168.5.1/24:80` makes uhttpd abort the
+   bind with `getaddrinfo(): Name does not resolve` and leaves the SPA
+   unreachable); `uci get uhttpd.main.listen_https` must print
+   `<lan-ip>:443`; `logread` must contain no `getaddrinfo()` error; and
+   the SPA must be served from `http://<lan-ip>/saadway/` on the same
+   origin as `/ubus`.
 
 ## Scenario 5 — Health, bandwidth, logs (Story 5; Gate 3 blocking)
 
