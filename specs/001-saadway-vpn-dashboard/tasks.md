@@ -209,6 +209,7 @@ tempted to use iptables/ipset/fw3 or a banned runtime is non-compliant.
 - **Remediation round 3 (Phase 14)**: depends on the Phase 13 delegation structure (T058) — T060 corrects the header name and the toolchain/staging-include propagation inside it; T060 is the only task, sequential by nature (header fix → staging path → cross-CC default); the authoritative SDK build proof folds into the T046/T057 on-device round
 - **Remediation round 4 (Phase 15)**: depends on the Phase 14 staging/toolchain fix (T060) — T061 aligns the daemon and the dev stub pool with the real upstream libubus deferred-request API and re-verifies the ubus status-code mapping; strictly sequential (stub API → daemon call sites → status mapping), and the SDK build proof again folds into the T046/T057 round
 - **Remediation round 5 (Phase 16)**: depends on the Phase 15 libubus alignment (T061) — T062 aligns the remaining libubus/libubox API surface (`UBUS_METHOD` arity, the two non-existent blobmsg helpers) in `ubus.c`, adds the local helpers to `saadway.h`, and purges the fictional declarations from the dev stub pool; sequential (helpers → method table → call sites → stub), SDK build proof folds into the T046/T057 round
+- **Remediation round 6 (Phase 17)**: depends on the Phase 16 compile surface (T062) — T063 closes the last link gap (the `global_ctx` definition) and adds the reusable host-side link-surface audit that would have caught it; sequential (definition → audit script), SDK link proof folds into the T046/T057 round
 
 ### User Story Dependencies
 
@@ -411,3 +412,34 @@ openwrt/ubus@master `libubus.h` — fetched for this task):**
   - Verification per docs/verify-2512.md: (i) `gcc -fsyntax-only` over all 13 modules against the **corrected** stub; (ii) unit suite `make check` still 21/21; (iii) `make -C saadway/src -n` pipeline and link line unchanged; (iv) the authoritative `make package/saadway/{clean,compile}` on the 25.12 SDK — the real proof — folded into the T046/T057 on-device round, where `mgmt.status` must still report `enabled`/`running` as JSON booleans and all 24 `saadway.*` method names must still match `contracts/api.md`.
 
 **Checkpoint**: the daemon compiles against the real OpenWrt 25.12 libubus/libubox API surface; no fictional libubus/libubox symbol remains in code or stubs; the RPC surface and its JSON types are unchanged from `contracts/api.md`.
+
+## Phase 17: Remediation Round 6 — Daemon Context Symbol & Link Surface
+
+**Purpose**: Resolve the final link failure of the 25.12 SDK build:
+`main.c:(.text+0x88): undefined reference to 'global_ctx'` — every object
+compiled, but the link could not resolve the daemon's context symbol.
+
+**Verified facts (this repo + a host-side `nm` symbol audit):**
+- `saadway/src/saadway.h:481` declares `extern struct sw_ctx
+  *global_ctx;` — a **declaration only**: no daemon translation unit
+  defines it. `main()` heap-allocates the context
+  (`calloc(1, sizeof(*c))`, main.c:547) and assigns `global_ctx = c;`
+  (main.c:552), while `ubus.c` and `dns.c` dereference it — referenced
+  everywhere, defined nowhere.
+- The unit suite linked only because `saadway/src/unit/test-stubs.c:17`
+  supplies its own definition ("owned by main.c; unit harness uses
+  NULL") — the intent was always that `main.c` owns it; the definition
+  was simply never written.
+- Host-side audit: after compiling the 13 modules, **every** unresolved
+  symbol is either a target-library API (blob*/blobmsg*/ubus*/uci*/
+  json_object*/uloop*) or libc — `global_ctx` is the **only**
+  daemon-internal symbol missing, so this closes the complete link gap.
+
+- [ ] T063: Instantiate global_ctx in main.c and link daemon context (missing) per Constitution I (Native Platform Compliance — the daemon must link and run as a procd service) and Gate 2 (footprint — no new dependency), with docs/verify-2512.md §8 + §10 as the build-time record — target files: `saadway/src/saadway.h`, `saadway/src/main.c`:
+  - `saadway/src/main.c` — define the symbol in exactly ONE daemon translation unit, the owner of the context lifetime: a file-scope, non-static `struct sw_ctx *global_ctx;` alongside the daemon's other globals; keep `main()`'s existing `global_ctx = c;` assignment (the context stays heap-allocated, so the POINTER is the global, not the struct) and keep the fail-closed `return 1` paths untouched.
+  - `saadway/src/saadway.h` — keep the `extern` declaration unchanged (it must stay `extern`: `ubus.c` and `dns.c` dereference it) and document next to it that the single definition lives in `main.c`, so a second definition is never added.
+  - Invariant to preserve: `saadway/src/unit/test-stubs.c` keeps its own `struct sw_ctx *global_ctx;` ONLY because the unit suite does not compile `main.c` (its SRC list excludes it) — if `main.c` ever joins the unit SRC list, the stub definition must be removed rather than duplicated (a duplicate symbol would break the unit link).
+  - Reusable host-side link-surface check: add `tests/link-audit.sh`, which compiles the 13 daemon modules against the dev stub headers and fails when any daemon-internal symbol (the `sw_*` / `h_*` / `global_ctx` set) is referenced but not defined by the module set — the check that would have caught this defect before the SDK build; it must be green from the start.
+  - Verification per docs/verify-2512.md: (i) `tests/link-audit.sh` green — no unresolved daemon-internal symbol; (ii) `gcc -fsyntax-only` over all 13 modules; (iii) unit suite `make check` still 21/21 (the stub's own definition stays — no duplicate); (iv) the authoritative full link on the 25.12 SDK — `make package/saadway/{clean,compile}` must now produce the `saadway` binary — folded into the T046/T057 on-device round.
+
+**Checkpoint**: the daemon links with no unresolved daemon-internal symbol; the context has exactly one owner; the link-surface check guards future rounds.

@@ -375,6 +375,21 @@ suite must be re-run against the **corrected** stub; the authoritative
   expression is undefined behaviour and trips `-Wsequence-point`; it needs
   its own remediation task. The authoritative SDK build stays in the
   T046/T057 on-device round.
+* **Link-surface audit (upstream/host facts for Phase 17 / T063).**
+  `saadway/src/saadway.h:481` declares `extern struct sw_ctx
+  *global_ctx;` — a declaration only; `main()` heap-allocates the
+  context (`calloc(1, sizeof(*c))`, main.c:547) and assigns
+  `global_ctx = c;` (main.c:552) while `ubus.c`/`dns.c` dereference it,
+  so the symbol was referenced but **defined nowhere** in the daemon
+  (the unit suite linked only because `src/unit/test-stubs.c:17`
+  supplies its own definition, whose comment already states "owned by
+  main.c"). A host-side `nm` audit over the 13 compiled modules shows
+  that after this fix **every** unresolved symbol is a target-library
+  API (blob*/blobmsg*/ubus*/uci*/json_object*/uloop*) or libc — the
+  daemon-internal set (`sw_*`, `h_*`, `global_ctx`) is fully resolved.
+  That audit is the reusable check the Phase-17 task turns into
+  `tests/link-audit.sh`; it detects missing definitions long before an
+  SDK build reaches the link step.
 
 ## 9. Footprint pointers → T045
 
