@@ -58,7 +58,7 @@ All mutating calls are gated by ACL; all responses redact secrets (FR-021).
 
 | Method | Params → Returns | Notes |
 |---|---|---|
-| `mgmt.status` | `{}` → `{ enabled, running, connection_status, active_profile, current_if, uptime_s, session_timeout }` | used by dashboard header + LuCI page; `session_timeout` feeds the login TTL (T053) |
+| `mgmt.status` | `{}` → `{ enabled, running, connection_status, active_profile, current_if, uptime_s, session_timeout, language }` | used by dashboard header + LuCI page; `session_timeout` feeds the login TTL (T053); `language` (T087/FR-027) is the daemon-side default for a browser without a stored preference — the browser's own stored choice still wins |
 | `mgmt.set` | `{ enabled: bool }` → `{ applied }` | enable/disable service (LuCI + dashboard) |
 | `mgmt.credentials.set` | `{ username: string, password: string }` → `{ applied }` | applies the **optional operator credential** (the `saadway_login` mapping) — the account is created if missing, the password is hashed by the platform's `passwd` (the plaintext is piped, never an argument), `/etc/config/rpcd` section `saadway_login` is updated (`username` + `password '$p$<user>'`) and rpcd is reloaded (FR-032). Never returns the secret (FR-033); invalid input → 400-class code, no change (FR-031). **Reachability changed with the auth bypass**: the panel's group grants it, but the LAN-scoped `unauthenticated` group covers the whole `saadway` object — so the method is LAN-reachable too (recorded as a deviation in docs/verify-2512.md §7) |
 

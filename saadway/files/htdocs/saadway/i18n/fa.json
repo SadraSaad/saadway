@@ -1,8 +1,6 @@
 {
 	"app_name": "Saadway",
 	"app_sub": "داشبورد تونل و مسیریابی",
-	"username": "نام کاربری",
-	"password": "گذرواژه",
 	"tab_profiles": "پروفایل‌ها",
 	"tab_steering": "مسیریابی",
 	"tab_security": "امنیت",
@@ -44,6 +42,7 @@
 	"import_user": "نام کاربری (اختیاری)",
 	"import_pass": "گذرواژه (اختیاری)",
 	"import_btn": "درون‌ریزی",
+	"import_creds_title": "بخش افزودن اختیاری فایل auth-user-pass همراه با نام کاربری و گذرواژه",
 	"e_no_remote": "خطا: نشانی سرور (remote) در پرونده نیست (E_NO_REMOTE)",
 	"e_bad_syntax": "خطای نگارش پرونده (E_BAD_SYNTAX)",
 	"e_unsupported": "دستور پشتیبانی‌نشده (E_UNSUPPORTED_DIRECTIVE)",
@@ -55,6 +54,20 @@
 	"ike_username": "نام کاربری (EAP)",
 	"ike_password": "گذرواژه (EAP)",
 	"ike_create": "ساخت",
+	"ike_type": "نوع",
+	"ike_type_value": "IKEv2 · احراز هویت با نام کاربری (MSCHAPv2)",
+	"ike_remote_id": "شناسه راه دور",
+	"ike_remote_same": "همان نام میزبان",
+	"ike_custom": "دلخواه",
+	"ike_local_id": "شناسه محلی",
+	"ike_local_same": "همان نام کاربری",
+	"ike_cert": "گواهی",
+	"ike_cert_value": "پیش‌فرض · از سرور",
+	"ike_proxy": "پروکسی",
+	"ike_proxy_value": "غیرفعال",
+	"ike_enc": "رمزنگاری (به‌طور خودکار مذاکره می‌شود)",
+	"ike_enc_value": "رمز: AES-256-GCM · یکپارچگی: SHA-256 · تبادل کلید: گروه ۲۰ (ECP384) · iOS: گروه ۲۱ (ECP521)",
+	"ike_id_required": "شناسهٔ دلخواه نباید خالی باشد",
 
 	"steer_title": "روتینگ ترافیک (تونل پیش‌فرض)",
 	"domains_head": "دامنه‌های دورزدن (مسیر مستقیم)",
@@ -117,7 +130,6 @@
 	"item": "مورد",
 
 	"save_error": "خطا؛ عمل انجام نشد",
-	"err_http_401": "نشست نامعتبر — دوباره وارد شوید",
 	"loading": "در حال بارگذاری…",
 	"empty": "— خالی —"
 }

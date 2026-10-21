@@ -142,10 +142,17 @@
 				'<input id="imp-name" autocomplete="off" spellcheck="false">' +
 				"<label>" + esc(T("import_file")) + "</label>" +
 				'<input id="imp-file" type="file" accept=".ovpn,text/plain">' +
+				/* FR-002: the optional auth-user-pass credentials live in
+				 * a section of their own (the title is specified by
+				 * the requirement); the section stays optional - an
+				 * empty user name omits the credentials entirely. */
+				'<fieldset class="sub"><legend>' +
+				esc(T("import_creds_title")) + "</legend>" +
 				"<label>" + esc(T("import_user")) + "</label>" +
 				'<input id="imp-user" autocomplete="off">' +
 				"<label>" + esc(T("import_pass")) + "</label>" +
 				'<input id="imp-pass" type="password">' +
+				"</fieldset>" +
 				'<button class="btn primary" data-act="import">' + esc(T("import_btn")) +
 				"</button></div>" +
 				'<div class="card"><h3>' + esc(T("ike_title")) + "</h3>" +
@@ -157,8 +164,48 @@
 				'<input id="ike-user" autocomplete="off" dir="ltr">' +
 				"<label>" + esc(T("ike_password")) + "</label>" +
 				'<input id="ike-pass" type="password" dir="ltr">' +
+				/* FR-004: the connection settings with their stated
+				 * defaults - each of them overridable, with the
+				 * "Same as ..." options preserved. */
+				"<label>" + esc(T("ike_type")) + "</label>" +
+				'<input id="ike-type" type="text" readonly value="' +
+				esc(T("ike_type_value")) + '">' +
+				"<label>" + esc(T("ike_remote_id")) + "</label>" +
+				'<select id="ike-remote-mode">' +
+				'<option value="same-as-hostname">' + esc(T("ike_remote_same")) + "</option>" +
+				'<option value="custom">' + esc(T("ike_custom")) + "</option>" +
+				"</select>" +
+				'<input id="ike-remote" autocomplete="off" spellcheck="false" class="hidden">' +
+				"<label>" + esc(T("ike_local_id")) + "</label>" +
+				'<select id="ike-local-mode">' +
+				'<option value="same-as-username">' + esc(T("ike_local_same")) + "</option>" +
+				'<option value="custom">' + esc(T("ike_custom")) + "</option>" +
+				"</select>" +
+				'<input id="ike-local" autocomplete="off" spellcheck="false" class="hidden">' +
+				"<label>" + esc(T("ike_cert")) + "</label>" +
+				'<input type="text" readonly value="' + esc(T("ike_cert_value")) + '">' +
+				"<label>" + esc(T("ike_proxy")) + "</label>" +
+				'<input type="text" readonly value="' + esc(T("ike_proxy_value")) + '">' +
+				/* FR-005: the encryption is negotiated automatically - the
+				 * form displays it, it does not offer it. */
+				"<label>" + esc(T("ike_enc")) + "</label>" +
+				'<p class="muted">' + esc(T("ike_enc_value")) + "</p>" +
 				'<button class="btn primary" data-act="ike-create">' +
 				esc(T("ike_create")) + "</button></div>";
+			/* FR-004: a custom identity is only asked for when it is
+			 * actually selected ("Same as ..." is the default). */
+			var rmode = $("#ike-remote-mode"), lmode = $("#ike-local-mode");
+			if (rmode && lmode) {
+				var sync_ids = function () {
+					$("#ike-remote").classList.toggle("hidden",
+						rmode.value !== "custom");
+					$("#ike-local").classList.toggle("hidden",
+						lmode.value !== "custom");
+				};
+				rmode.addEventListener("change", sync_ids);
+				lmode.addEventListener("change", sync_ids);
+				sync_ids();
+			}
 		});
 	}
 
@@ -230,8 +277,23 @@
 				hostname: $("#ike-host").value.trim(),
 				username: $("#ike-user").value,
 				password: $("#ike-pass").value,
+				/* FR-004: the certificate mode is the only one the
+				 * daemon accepts ("from-server"); the proxy is
+				 * fixed to "off" and carries no parameter. */
+				cert_mode: "from-server",
 			};
 			if (!im.name || !im.hostname) { toast(T("save_error"), true); return; }
+			var rmode = $("#ike-remote-mode"), lmode = $("#ike-local-mode");
+			if (rmode && rmode.value === "custom") {
+				var rid = $("#ike-remote").value.trim();
+				if (!rid) { toast(T("ike_id_required"), true); return; }
+				im.remote_id = rid;
+			}
+			if (lmode && lmode.value === "custom") {
+				var lid = $("#ike-local").value.trim();
+				if (!lid) { toast(T("ike_id_required"), true); return; }
+				im.local_id = lid;
+			}
 			SwApi.saadway("profile.create_ikev2", im).then(function (r) {
 				if (r.ok) { tab_profiles(); }
 				else toast(err_of(r, T), true);
@@ -609,6 +671,17 @@
 	/* ---------------------------------------------------------------- */
 
 	function boot() {
+		/* FR-027 / T087: the daemon-side language is the default for a
+		 * browser without a stored preference; the browser's own
+		 * stored choice still wins (i18n.init prefers it). */
+		SwApi.saadway("mgmt.status").then(function (r) {
+			if (r.ok && r.data && r.data.language)
+				window.I18n.set_default(r.data.language);
+			start_ui();
+		}).catch(function () { start_ui(); });
+	}
+
+	function start_ui() {
 		window.I18n.init(function () {
 			document.querySelectorAll(".tab").forEach(function (el) {
 				el.addEventListener("click", function () {

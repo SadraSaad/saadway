@@ -126,13 +126,21 @@ saadway/                     # core service package
 │   │                         # to the root-only provisioning helper (stdin)
 │   ├── backup.c             # JSON export/import (schema v1)
 │   ├── log.c                # syslog writer with secret scrubbing
+│   ├── saadway.h            # the shared context, the module API, the shims
 │   └── unit/                # host-side unit tests (cmocka harness)
 └── files/
     ├── saadway.init         # procd service definition
     ├── saadway.conf         # UCI defaults
     ├── core.nft             # fw4/nftables include templates
-    ├── rpc-acl.json         # ubus ACL for dashboard sessions
-    ├── saadway-provision     # root-only credential helper (set/passwd/unset)
+    ├── bypass-cidr.txt      # the bundled local/country/banking bypass set
+    ├── rpc-acl.json         # ubus ACL: the 'saadway' operator group and the
+    │                        # 'unauthenticated' group of the tokenless SPA
+    ├── saadway-provision     # root-only credential helper (init/set/passwd/
+    │                        # set-credentials/unset)
+    ├── saadway-ovpn-updown  # the openvpn up/down script (route/DNS hooks)
+    ├── uci-defaults/
+    │   ├── 40-saadway-uhttpd # the LAN-bound uhttpd listener
+    │   └── 50-saadway-rpcd  # the optional rpcd login mapping
     └── htdocs/saadway/      # standalone dashboard SPA (vanilla JS)
         ├── index.html
         ├── css/             # RTL-first styles, Persian default
@@ -146,20 +154,23 @@ luci-app-saadway/            # LuCI app package (status page + credential tab)
 │                             # (status, enable/disable, open link) and
 │                             # Dashboard Credentials (username/password/
 │                             # confirmation + Save & Apply)
-└── root/usr/share/rpcd/acl.d/
-    ├── luci-app-saadway.json  # the view's own session grants (mgmt.status/
-    │                         # mgmt.set) — NOT the credential method
-    └── saadway-credentials.json  # root-only grant: exactly one method
-                              # (saadway.mgmt.credentials.set)
+└── root/usr/share/
+    ├── rpcd/acl.d/
+    │   ├── luci-app-saadway.json  # the view's own session grants (uci scope
+    │   │                         # + mgmt.status/mgmt.set)
+    │   └── saadway-credentials.json  # the narrow grant: exactly one method
+    │                             # (saadway.mgmt.credentials.set)
+    └── luci/menu.d/
+        └── luci-app-saadway.json  # the panel's menu entry
 
 tests/                       # on-device smoke & integration scripts
-├── smoke-switching.sh       # gate 4/5/7 helpers
 ├── smoke-container.sh       # block-gate: UI liveness with dead test target
 ├── leak-check.sh            # zero-leak packet counter under switch/drop
 ├── restore-roundtrip.sh     # backup export→import fidelity
 ├── credential-flow-audit.sh # static audit of the credential contract
 │                             # ($p$ reference, stdin piping, ACL scoping)
 ├── dashboard-credential-audit.sh  # the default-credential contract audit
+├── luci-spa-audit.sh        # the LuCI rendering + tokenless-SPA contract
 ├── link-audit.sh            # daemon-internal symbol resolution
 ├── pkg-metadata-audit.sh    # OpenWrt package metadata contract
 ├── service-startup-audit.sh # procd API surface + no hardcoded socket path

@@ -994,7 +994,7 @@ work: 8 partial gaps and 1 unrequested artifact remained. The on-device
 items are already tracked as **T046** and **T057** (device-bound) and are
 NOT re-appended here.
 
-- [ ] T082: Extend the standalone dashboard's IKEv2 form with the FR-004 connection settings and the FR-005 encryption readout per FR-004, FR-005 (partial) — target file: `saadway/files/htdocs/saadway/js/app.js`:
+- [X] T082: Extend the standalone dashboard's IKEv2 form with the FR-004 connection settings and the FR-005 encryption readout per FR-004, FR-005 (partial) — target file: `saadway/files/htdocs/saadway/js/app.js`:
   - The IKEv2 card currently renders **only** `name`, `hostname`, `username`
     and `password` (`js/app.js:151-161`). FR-004 requires the form to
     provide the connection settings with the stated defaults — **Type** =
@@ -1027,7 +1027,7 @@ NOT re-appended here.
     `remote_id`/`local_id`/`cert_mode`/`proxy` are observable in
     `/etc/config/saadway` (on-device proof folded into T046/T057).
 
-- [ ] T083: Fix the undefined behaviour in the WAN-interface enumeration per FR-011, FR-014 (partial) — target file: `saadway/src/policy.c`:
+- [X] T083: Fix the undefined behaviour in the WAN-interface enumeration per FR-011, FR-014 (partial) — target file: `saadway/src/policy.c`:
   - `saadway/src/policy.c:163` reads and modifies `nwans` in one expression
     without a sequence point — `wans[nwans++] = wan_names[nwans];` — which
     the compiler flags as `-Wsequence-point` ("operation on 'nwans' may be
@@ -1042,7 +1042,7 @@ NOT re-appended here.
     `saadway/src/policy.c` is clean of the sequence-point warning, the
     unit suite stays green, and `tests/link-audit.sh` resolves the module.
 
-- [ ] T084: Remove the undefined behaviour from the profile-name normalization helper per FR-006 (partial) — target file: `saadway/src/uci-state.c`:
+- [X] T084: Remove the undefined behaviour from the profile-name normalization helper per FR-006 (partial) — target file: `saadway/src/uci-state.c`:
   - `saadway/src/uci-state.c:376` — `dst[o++] = (char)(o ? c : 'a');` —
     reads and modifies `o` without a sequence point (`-Wsequence-point`).
     The helper `sw_util_normalize_name()` currently has **no caller** (it
@@ -1054,7 +1054,7 @@ NOT re-appended here.
     unit suite stays green, and `tests/link-audit.sh` still resolves every
     daemon-internal symbol.
 
-- [ ] T085: Give the OpenVPN import form its own titled credential section per FR-002 (partial) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
+- [X] T085: Give the OpenVPN import form its own titled credential section per FR-002 (partial) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
   - FR-002 requires a section titled *"Section to add an optional
     'auth-user-pass' file with your credentials"* where the username and
     password may optionally be entered. The optional fields ARE present
@@ -1070,7 +1070,7 @@ NOT re-appended here.
     profile with and without credentials still behaves as before (the
     secret lands in the 0600 `auth-user-pass` file, never in UCI).
 
-- [ ] T086: Clear the compiler warnings in the daemon modules per Constitution I (partial) — target files: `saadway/src/ubus.c`, `saadway/src/tunnel-openvpn.c`, `saadway/src/counters.c`:
+- [X] T086: Clear the compiler warnings in the daemon modules per Constitution I (partial) — target files: `saadway/src/ubus.c`, `saadway/src/tunnel-openvpn.c`, `saadway/src/counters.c`:
   - Five unused variables remain: `saadway/src/ubus.c:1049` (`lv`, `cv` in
     `h_mon_logs`), `saadway/src/tunnel-openvpn.c:156` (`rst`) and `:204`
     (`ret`), `saadway/src/counters.c:21` (`v`). Remove them (or use them
@@ -1083,7 +1083,7 @@ NOT re-appended here.
   - Verification: the sweep over the 14 modules reports **0** warnings, the
     unit suite stays green, and `tests/link-audit.sh` stays green.
 
-- [ ] T087: Make the dashboard's language preference single-sourced per FR-027 (partial) — target files: `saadway/src/uci-state.c`, `saadway/files/htdocs/saadway/js/i18n.js`:
+- [X] T087: Make the dashboard's language preference single-sourced per FR-027 (partial) — target files: `saadway/src/uci-state.c`, `saadway/files/htdocs/saadway/js/i18n.js`:
   - The SPA keeps the language in the browser's `localStorage`
     (`js/i18n.js:14`, key `saadway.lang`) while the daemon reads and
     re-persists a `dashboard.language` UCI option
@@ -1106,7 +1106,7 @@ NOT re-appended here.
     the SPA still restores the browser's language preference across a
     reload.
 
-- [ ] T088: Reconcile the root-only credential ACL group with the post-bypass reality per FR-034 (unrequested) — target files: `luci-app-saadway/root/usr/share/rpcd/acl.d/saadway-credentials.json`, `tests/credential-flow-audit.sh`:
+- [X] T088: Reconcile the root-only credential ACL group with the post-bypass reality per FR-034 (unrequested) — target files: `luci-app-saadway/root/usr/share/rpcd/acl.d/saadway-credentials.json`, `tests/credential-flow-audit.sh`:
   - The group still describes itself as the **root-only** gate for
     `saadway.mgmt.credentials.set`, but since the auth bypass the
     LAN-scoped `unauthenticated` group covers the whole `saadway` object —
@@ -1129,7 +1129,7 @@ NOT re-appended here.
   - Verification: the audit stays green and its negative run (the pre-T079
     tree) still fails, and the ACL file remains valid JSON.
 
-- [ ] T089: Align the plan's project-structure tree with the shipped tree per plan: project structure (partial) — target file: `specs/001-saadway-vpn-dashboard/plan.md`:
+- [X] T089: Align the plan's project-structure tree with the shipped tree per plan: project structure (partial) — target file: `specs/001-saadway-vpn-dashboard/plan.md`:
   - The structure tree names `tests/smoke-switching.sh` — a script that
     does not exist (the on-device switching/leak coverage is
     `tests/smoke-container.sh` + `tests/leak-check.sh`) — and omits the
@@ -1142,7 +1142,7 @@ NOT re-appended here.
   - Verification: every path named in the tree exists in the repository
     (a `find`-based existence check over the tree's file names).
 
-- [ ] T090: Drop the retired session-error string from the dashboard locales per FR-020 (partial) — target files: `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
+- [X] T090: Drop the retired session-error string from the dashboard locales per FR-020 (partial) — target files: `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
   - `err_http_401` ("Invalid session — log in again" / "نشست نامعتبر — دوباره
     وارد شوید") is unreferenced since the dashboard became tokenless
     (T079) — there is no session to invalidate.
@@ -1150,6 +1150,17 @@ NOT re-appended here.
     grep the shipped SPA for any remaining reference to it.
   - Verification: the SPA parses, the locales are 1:1, and no shipped
     JavaScript references the removed key.
+
+**As implemented (T082–T090)** — two decisions worth recording:
+1. **T084 kept the helper** (it fixed the sequencing instead of deleting the
+   dead `sw_util_normalize_name()`); the daemon now compiles with **0**
+   warnings under `-Wall -Wextra` across all 14 modules — the check that
+   would have caught both sequence-point defects.
+2. **T087 made the daemon-side `dashboard.language` the DEFAULT**, not the
+   authoritative copy: the browser's stored choice still wins, the daemon
+   exposes its value as `mgmt.status → language`, and the SPA applies it
+   before the first render. The decision is recorded in
+   `specs/001-saadway-vpn-dashboard/contracts/uci.md` ✓.
 
 **Checkpoint**: the shipped code satisfies every requirement of the amended
 specification except the nine items above; the two sequence-point defects

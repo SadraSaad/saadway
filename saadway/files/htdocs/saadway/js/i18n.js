@@ -1,6 +1,11 @@
-/* i18n.js — dictionary loader + language persistence (T029, FR-023/Q4-A).
+/* i18n.js — dictionary loader + language persistence (T029, FR-023/Q4-A,
+ * T087/FR-027).
  * Persian-first: default language "fa" (RTL). Preference persists in
- * localStorage only — never in URL parameters (no token/UI state leakage). */
+ * localStorage only — never in URL parameters (no token/UI state leakage).
+ * T087: the daemon-side `dashboard.language` option is the DEFAULT for a
+ * browser without a stored preference (the SPA applies it via
+ * set_default() before init()); the browser's own stored choice always
+ * wins, so the two sources cannot drift. */
 
 "use strict";
 
@@ -58,6 +63,11 @@ window.I18n = (function () {
 
 	function get() { return lang; }
 
+	/* the daemon-side default (mgmt.status → "language") */
+	function set_default(l) {
+		if (SUPPORTED.indexOf(l) >= 0) DEFAULT_LANG = l;
+	}
+
 	function set(l, cb) {
 		if (SUPPORTED.indexOf(l) < 0) return;
 		if (DICTS[l]) {
@@ -82,6 +92,6 @@ window.I18n = (function () {
 	}
 
 	return {
-		init: init, set: set, get: get, t: t,
+		init: init, set: set, get: get, t: t, set_default: set_default,
 	};
 })();

@@ -1121,6 +1121,49 @@ this phase; each traces to the appended tasks.md lines.
   SC-013). The residual risk of a LAN-scoped, unauthenticated dashboard
   surface is recorded in section 7.
 
+### Phase 25 record — convergence gap closure (T082–T090)
+
+* **Two undefined behaviours removed** (both flagged by `-Wsequence-point`):
+  `saadway/src/policy.c` — `wans[nwans++] = wan_names[nwans];` modified and
+  read `nwans` without a sequence point, so the right-hand read could observe
+  the incremented index and store a **wild pointer** in the WAN-interface
+  list; the store and the increment are now sequenced explicitly and the
+  array bound is checked. `saadway/src/uci-state.c` —
+  `dst[o++] = (char)(o ? c : 'a');` had the same defect in the
+  profile-name normalization helper (kept, not deleted: the sequencing is
+  fixed).
+* **The daemon now compiles clean**: 5 unused variables removed
+  (`ubus.c` ×2, `tunnel-openvpn.c` ×2, `counters.c` ×1) — the 14 modules
+  report **0** warnings under `gcc -fsyntax-only -std=c11 -Wall -Wextra`,
+  which is the check that would have caught the two defects above.
+* **The IKEv2 form now carries the FR-004 surface**: Type (IKEv2 · username
+  auth / MSCHAPv2, fixed), Remote ID and Local ID (each with its "Same as …"
+  default plus a custom override that is sent as `remote_id`/`local_id`),
+  Certificate ("Leave default · from server" — the only mode the daemon
+  accepts) and Proxy (Off, fixed), plus the FR-005 encryption readout
+  (AES-256-GCM · SHA-256 · ECP384 / ECP521 — the daemon's own default
+  proposals). The daemon and the API already supported all of it; the gap
+  was UI-only.
+* **The import card** has its own titled credential section (FR-002), and the
+  retired session strings (`err_http_401`, the login form's `username` /
+  `password` labels) are gone from both locales — the dictionaries are
+  **120 = 120** ✓.
+* **The access-control artifacts now describe the post-bypass reality**: the
+  `saadway-credentials` group no longer claims an exclusivity the
+  `unauthenticated` wildcard took away, and
+  `tests/credential-flow-audit.sh` check E asserts the real state (the
+  narrow grant names the method; the wildcard coverage is acknowledged and
+  points at the §7 deviation) instead of a vacuous literal grep.
+* **The language preference has one authority**: the daemon's
+  `dashboard.language` is the *default* for a browser without a stored
+  preference (exposed as `mgmt.status → language`), the browser's own
+  stored choice still wins, and the decision is recorded in
+  `contracts/uci.md`.
+* **Host evidence**: all seven host audits green, the unit suite 21/21, the
+  14-module `-Wall -Wextra` sweep clean, shellcheck clean, all shipped
+  JavaScript parses, all shipped JSON valid, the i18n locales 1:1, and the
+  plan's project-structure tree lists only files that exist.
+
 ---
 
 **Traceability:** Gates 1–7 are executed by `quickstart.md` scenarios 1–7

@@ -232,10 +232,21 @@ else
 	report_fail "the saadway-credentials ACL file is missing"
 fi
 
-if grep -q 'mgmt.credentials.set' "$RPC_ACL"; then
-	report_fail "the dashboard's own 'saadway' ACL group grants mgmt.credentials.set — the dashboard could re-key its own login"
+# T079/T088: the dashboard's own group holds the WILDCARD, so the method is
+# LAN-reachable — the old literal grep passed vacuously. Assert the real
+# state instead: the group must not name the method literally (the narrow
+# grant lives in saadway-credentials.json) and the wildcard coverage must be
+# acknowledged explicitly (docs/verify-2512.md §7).
+if grep -q '"mgmt.credentials.set"' "$RPC_ACL"; then
+	report_fail "the dashboard's own 'saadway' ACL group names mgmt.credentials.set literally — the narrow grant belongs to the saadway-credentials group"
 else
-	report_pass "the dashboard's 'saadway' group does not grant mgmt.credentials.set"
+	report_pass "the dashboard's 'saadway' group does not name the credential method literally"
+fi
+
+if grep -q '"\*"' "$RPC_ACL"; then
+	report_pass "the dashboard's group holds the saadway wildcard — the credential method IS LAN-reachable (recorded as a deviation in docs/verify-2512.md §7)"
+else
+	report_fail "the dashboard's group grants no wildcard — the wildcard coverage of mgmt.credentials.set must be stated explicitly (docs/verify-2512.md §7)"
 fi
 
 # ---------------------------------------------------------------------

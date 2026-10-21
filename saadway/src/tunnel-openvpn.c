@@ -153,7 +153,7 @@ static const char *process_line(struct imp *m, const char *raw, bool *has_remote
 		return NULL;
 
 	/* directive */
-	char dir[64], arg[768], rst[1024];
+	char dir[64], arg[768];
 	int n = sscanf(line, "%63s %767[^\n]", dir, arg);
 	if (n < 1)
 		return "E_BAD_SYNTAX";
@@ -201,7 +201,6 @@ int sw_ovpn_import(struct sw_ctx *c, const char *name, const char *ovpn_b64,
 	unsigned char *ovpn = NULL;
 	size_t ovpnlen = 0;
 	bool has_remote = false;
-	int ret = -1;
 
 	if (!c || !name || !sw_valid_name(name)) {
 		snprintf(detail, detail_len, "E_BAD_SYNTAX: invalid profile name");

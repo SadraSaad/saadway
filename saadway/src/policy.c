@@ -157,10 +157,16 @@ void sw_policy_refresh_lan_devices(struct sw_ctx *c)
 		char name[16];
 		if (!devpos)
 			continue;
-		if (sscanf(devpos + 4, "%15s", name) == 1) {
+		if (sscanf(devpos + 4, "%15s", name) == 1 && nwans < 8) {
 			snprintf(wan_names[nwans], sizeof(wan_names[0]), "%s",
 				 name);
-			wans[nwans++] = wan_names[nwans];
+			/* store the pointer FIRST, then advance the counter:
+			 * `wans[nwans++] = wan_names[nwans]` modified and read
+			 * nwans without a sequence point (undefined behaviour —
+			 * the right-hand read may observe the incremented index
+			 * and store a wild pointer). */
+			wans[nwans] = wan_names[nwans];
+			nwans++;
 		}
 	}
 

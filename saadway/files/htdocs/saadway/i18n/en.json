@@ -1,8 +1,6 @@
 {
 	"app_name": "SaadWay",
 	"app_sub": "VPN Tunnel & Routing Dashboard",
-	"username": "Username",
-	"password": "Password",
 	"tab_profiles": "Profiles",
 	"tab_steering": "Steering",
 	"tab_security": "Security",
@@ -44,6 +42,7 @@
 	"import_user": "Username (optional)",
 	"import_pass": "Password (optional)",
 	"import_btn": "Import",
+	"import_creds_title": "Section to add an optional \"auth-user-pass\" file with your credentials",
 	"e_no_remote": "Error: no remote in file (E_NO_REMOTE)",
 	"e_bad_syntax": "File syntax error (E_BAD_SYNTAX)",
 	"e_unsupported": "Unsupported directive (E_UNSUPPORTED_DIRECTIVE)",
@@ -55,6 +54,20 @@
 	"ike_username": "Username (EAP)",
 	"ike_password": "Password (EAP)",
 	"ike_create": "Create",
+	"ike_type": "Type",
+	"ike_type_value": "IKEv2 · username auth (MSCHAPv2)",
+	"ike_remote_id": "Remote ID",
+	"ike_remote_same": "Same as hostname",
+	"ike_custom": "Custom",
+	"ike_local_id": "Local ID",
+	"ike_local_same": "Same as username",
+	"ike_cert": "Certificate",
+	"ike_cert_value": "Leave default · from server",
+	"ike_proxy": "Proxy",
+	"ike_proxy_value": "Off",
+	"ike_enc": "Encryption (negotiated automatically)",
+	"ike_enc_value": "Cipher: AES-256-GCM · Integrity: SHA-256 · Key exchange: DH group 20 (ECP384) · iOS key exchange: DH group 21 (ECP521)",
+	"ike_id_required": "The custom ID must not be empty",
 
 	"steer_title": "Traffic steering (tunnel-default)",
 	"domains_head": "Bypass domains (direct path)",
@@ -117,7 +130,6 @@
 	"item": "Item",
 
 	"save_error": "Error; action failed",
-	"err_http_401": "Invalid session — log in again",
 	"loading": "Loading…",
 	"empty": "— empty —"
 }

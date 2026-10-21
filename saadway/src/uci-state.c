@@ -372,8 +372,14 @@ void sw_util_normalize_name(char *dst, size_t dstlen, const char *src)
 		unsigned char c = (unsigned char)src[i++];
 		if (isalnum(c))
 			dst[o++] = (char)tolower(c);
-		else if (c == '-' || c == '_')
-			dst[o++] = (char)(o ? c : 'a');
+		else if (c == '-' || c == '_') {
+			/* read o BEFORE the increment: `dst[o++] = (char)(o ? c
+			 * : 'a')` modified and read o without a sequence point
+			 * (undefined behaviour). */
+			char keep = o ? c : 'a';
+
+			dst[o++] = keep;
+		}
 	}
 	while (o < 4)
 		dst[o++] = 'a';                 /* avoid too-short ifnames */

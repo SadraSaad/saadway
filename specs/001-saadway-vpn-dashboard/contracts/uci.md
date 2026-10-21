@@ -33,11 +33,20 @@ config dashboard 'dashboard'
 Credential material is never a UCI option: the dedicated user's hash lives
 in `/etc/shadow`, referenced from `/etc/config/rpcd` as
 `option password '$p$admin'` (uci-defaults/50-saadway-rpcd +
-`saadway-provision`). The dashboard ships with the default credential
-`admin` / `admin`; the password is applied by `saadway-provision` over
-stdin and is changed with `saadway-provision passwd` or from the LuCI
-credentials tab. The option values here are presentation/lifecycle
-preferences only.
+`saadway-provision`). Since the auth bypass (T079 — spec FR-020/FR-035) the
+dashboard needs **no** credential at all and the installation ships **no**
+default password: the optional `saadway_login` account is created on demand
+by the LuCI credentials tab, which applies the password over stdin through
+`saadway-provision` (never as an argument). The option values here are
+presentation/lifecycle preferences only.
+
+- **`dashboard.language` (T087/FR-027)**: the **daemon-side default** for the
+  dashboard's interface language. The dashboard keeps the administrator's own
+  choice in the browser (`localStorage`, key `saadway.lang`) and that stored
+  choice always wins; the UCI value is what a browser without a stored
+  preference falls back to (and it travels with the backup — the
+  export/import round-trip restores it). It is exposed to the client as
+  `mgmt.status → language`; no surface changes it at runtime.
 
 ### The optional login mapping in `/etc/config/rpcd` (not part of `/etc/config/saadway`)
 

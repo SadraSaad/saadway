@@ -18,7 +18,6 @@ static uint64_t read_bytes(const char *ifname, const char *leaf)
 	char path[128];
 	char b[64];
 	FILE *f;
-	uint64_t v = 0;
 
 	snprintf(path, sizeof(path),
 		 "/sys/class/net/%s/statistics/%s", ifname, leaf);

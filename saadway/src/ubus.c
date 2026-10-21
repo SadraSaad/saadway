@@ -184,6 +184,10 @@ static int h_mgmt_status(struct ubus_context *ctx, struct ubus_object *obj,
 	blobmsg_add_string(&bb, "active_profile", c->st.active_profile);
 	blobmsg_add_string(&bb, "current_if", c->tun_if[0] ? c->tun_if : "-");
 	blobmsg_add_u32(&bb, "uptime_s", (uint32_t)time(NULL));
+	/* T087 (FR-027): the daemon-side language is the DEFAULT for a
+	 * browser without a stored preference; the browser's own choice
+	 * still wins (the SPA keeps it in localStorage). */
+	blobmsg_add_string(&bb, "language", c->st.language);
 	/* T053 (FR-020): expose the configured session TTL; the SPA requests
 	 * this value at session.login so the UCI option actually governs the
 	 * inactivity expiry (data-model §DashboardSession). */
@@ -1046,7 +1050,6 @@ static int h_mon_logs(struct ubus_context *ctx, struct ubus_object *obj,
 		      struct ubus_request_data *req, const char *method,
 		      struct blob_attr *msg)
 {
-	struct blob_attr *cv, *lv;
 	long cursor = 0;
 	int max = 20;
 	struct sw_log_entry entries[64];
