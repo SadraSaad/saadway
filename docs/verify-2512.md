@@ -1273,6 +1273,56 @@ this phase; each traces to the appended tasks.md lines.
   JavaScript parses, all shipped JSON valid, the i18n locales **128 = 128**,
   and the data model's section types now match `saadway.conf`.
 
+### Phase 30 record — the IKEv2 form submission & the nftables transaction (T103)
+
+* **The frontend defect was the event dispatch, not the form.**
+  `saadway/files/htdocs/saadway/js/app.js`: `panel_events()` (line 697) opened
+  `if (btn) { … }` and that block ended with an **unconditional `return;`**
+  (line 783), so the fall-through `panel_click(ev);` (line 784) was
+  **unreachable** for every click carrying a `data-act` attribute. The whole
+  profiles panel was therefore dead — *import*, **ike-create**, *activate*,
+  *deactivate*, *edit* and *delete* — which is exactly "clicking Create
+  produces no reaction and no console errors". The return is removed and
+  `panel_click()` now scopes itself to `#panel-profiles` (it computed the
+  panel id but never used it, so the other panels' buttons would otherwise
+  cross-talk into it). The profile-form buttons are `type="button"`.
+* **The transport already carried the reason.** uhttpd-mod-ubus's legacy
+  envelope carries the daemon's reply attributes in `result[1]`
+  (`openwrt/uhttpd` `ubus.c:474-492`), so `detail` reached the SPA; the
+  missing piece was the fallback — `js/api.js` now maps the ubus status
+  codes (2 = invalid argument, 6 = permission denied, …) to a readable
+  reason and exposes `describe()`, which `err_of()` uses.
+* **The nftables defect was the element list, not the transaction.**
+  `saadway/src/policy.c`: `render_dev_sets()` emitted **both** device sets
+  whenever either kind of rule existed, with a `;` terminator and a
+  **shared** separator counter — so a single IP rule produced
+  `elements = { ; }` for `dev_mac`, and a MAC rule that was not the first
+  rule produced a leading `", "`. Both are nftables syntax errors: nft
+  rejects the whole table, the delete+create transaction fails, the
+  create-only retry fails with the same content, and the daemon falls back
+  to the emergency containment (`SENTINEL: EMERGENCY CONTAINMENT
+  (tunnel-class egress blackholed)`, `policy.c:580`). The sets are now
+  emitted only when they have elements, with a per-list counter and
+  nftables' comma syntax — the pattern `sw_steering_mark_ranges()` already
+  uses in `steering.c`.
+* **Diagnosability.** `run_argv()` (`policy.c:31`) sent the child's stdout
+  *and* stderr to `/dev/null`, so nft's own parse error was discarded and
+  the log only ever showed `rc=1`. The child's stderr now lands in a 0600
+  file next to the render file and is logged with the failing transaction.
+  The fail-closed behaviour is unchanged — only the diagnosis improves.
+* **TDD.** `saadway/src/unit/test_policy_render.c` never asserted the
+  device sets, which is why the defect shipped. It now covers an IP-only
+  rule, a MAC-only rule, both kinds (with the MAC rule **not** first) and
+  no rule at all, plus a "no malformed element list" guard. The new cases
+  were verified to **fail against the pre-fix renderer** (3 of the 4) and to
+  pass after the fix.
+* **`saadway/files/core.nft`** now documents the two per-device sets and
+  their element syntax, as its own header requires ("Keep it in sync with
+  policy.c").
+* **Host evidence**: all seven host audits green, the unit suite green, the
+  14-module `-Wall -Wextra` sweep clean, shellcheck clean, all shipped
+  JavaScript parses, all shipped JSON valid, the i18n locales **128 = 128**.
+
 ---
 
 **Traceability:** Gates 1–7 are executed by `quickstart.md` scenarios 1–7

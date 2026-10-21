@@ -1485,7 +1485,7 @@ statements that still describe the pre-auth-bypass model. The on-device
 items remain tracked as **T046** and **T057** (device-bound) and are NOT
 re-appended.
 
-- [ ] T100: Reconcile the credential edge case with the amended access model per FR-020, FR-034 (contradicts) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
+- [X] T100: Reconcile the credential edge case with the amended access model per FR-020, FR-034 (contradicts) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
   - The edge-case list still contains: *"A client without an administrative
     session reaching the credentials form: the form and its action MUST be
     unreachable, and the stored credential MUST NOT be readable."* The
@@ -1513,7 +1513,7 @@ re-appended.
     history), and the two neighbouring edge cases keep their SUPERSEDED
     markers.
 
-- [ ] T101: Update the plan's Constitution Check table to the v1.2.0 model per plan: the Constitution Check, Constitution V / IV (contradicts) — target file: `specs/001-saadway-vpn-dashboard/plan.md`:
+- [X] T101: Update the plan's Constitution Check table to the v1.2.0 model per plan: the Constitution Check, Constitution V / IV (contradicts) — target file: `specs/001-saadway-vpn-dashboard/plan.md`:
   - Two rows of the compliance table still assert the pre-auth-bypass
     model:
     - **Principle V**: *"research.md D7 (uhttpd-mod-ubus authenticated
@@ -1544,7 +1544,7 @@ re-appended.
     API or a root-only credential grant, and each row's evidence still
     points at an artifact that exists.
 
-- [ ] T102: Mark the concurrent-dashboard edge case as superseded per FR-020 (partial) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
+- [X] T102: Mark the concurrent-dashboard edge case as superseded per FR-020 (partial) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
   - The edge case *"Dashboard access from concurrently connected devices:
     multiple simultaneous administrator sessions must be supported without
     one session invalidating another's configuration changes mid-edit"*
@@ -1603,7 +1603,7 @@ fail-closed emergency containment.
   **stdout and stderr to `/dev/null`**, so nft's own error text is
   discarded: the log shows only `rc=1`, never the reason.
 
-- [ ] T103: Fix IKEv2 creation submission feedback and resolve nftables transaction failure per FR-003, FR-014, FR-025, US1/AC3, Constitution IV (fail closed) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/js/api.js`, `saadway/files/core.nft`, `saadway/src/policy.c`, `saadway/src/unit/test_policy_render.c`:
+- [X] T103: Fix IKEv2 creation submission feedback and resolve nftables transaction failure per FR-003, FR-014, FR-025, US1/AC3, Constitution IV (fail closed) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/js/api.js`, `saadway/files/core.nft`, `saadway/src/policy.c`, `saadway/src/unit/test_policy_render.c`:
   - **Part A — the frontend (`js/app.js`, `js/api.js`).**
     - `panel_events()` MUST stop swallowing the profiles-panel actions: the
       unconditional `return;` at the end of its `if (btn)` block MUST be
@@ -1677,6 +1677,27 @@ fail-closed emergency containment.
       visible result (a profile in the list, or a readable error), and the
       profiles panel's import / activate / deactivate / delete actions work
       again.
+
+**As implemented (T103)** — two decisions worth recording:
+1. **The frontend fix was the dispatch, not the form**: the IKEv2 form
+   never reported anything because `panel_events()` ended its `if (btn)`
+   block with an unconditional `return;`, so `panel_click()` — which
+   owns *import*, **ike-create**, *activate*, *deactivate*, *edit* and
+   *delete* — was unreachable for every `data-act` click. Removing that
+   return restores the whole profiles panel, and `panel_click()` now
+   scopes itself to `#panel-profiles` so the other panels' buttons cannot
+   cross-talk into it. The transport already delivered the daemon's
+   `detail` (uhttpd-mod-ubus's legacy envelope carries it in
+   `result[1]`), so `api.js` only had to add the ubus-status → readable
+   reason mapping as the fallback.
+2. **The nftables fix was the element list, not the transaction**: the
+   delete+create transaction and its create-only fallback are correct; the
+   rendered table was invalid. The device sets now use a per-list counter,
+   nftables' comma syntax, and are emitted only when they have elements.
+   `run_argv()` now captures the child's stderr into a 0600 file next to
+   the render file, so a rejected ruleset reports nft's own parse error
+   instead of a bare `rc=1` — the fail-closed behaviour itself is
+   unchanged.
 
 **Checkpoint**: the profiles panel's actions reach the daemon again, the
 IKEv2 creation always reports its outcome, and the rendered nftables table

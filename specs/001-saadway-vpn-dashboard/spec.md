@@ -317,9 +317,14 @@ an active tunnel and verifying state recovery after reboot.
 - **Credentials with special characters/unicode in forms** must be
   accepted and stored without corruption (masking rules must not break
   entry).
-- **Dashboard access from concurrently connected devices**: multiple
-  simultaneous administrator sessions must be supported without one
-  session invalidating another's configuration changes mid-edit.
+- **Dashboard access from concurrently connected devices**: several clients
+  may drive the dashboard **concurrently**, and the configuration changes of
+  one must not be invalidated by another's mid-edit (the UCI-backed state
+  model of constitution VI and the per-rule set semantics of
+  `steer.device.set` guarantee it). **[The original wording — "multiple
+  simultaneous administrator sessions" — is SUPERSEDED 2026-10-21 by the
+  auth bypass: the dashboard has no sessions, its calls are authorized as
+  rpcd's default (unauthenticated) session.]**
 - **The optional credential must not fight the administrator**: the
   initialization of the optional `saadway_login` credential must never
   overwrite a credential the administrator has already changed — a reboot,
@@ -336,8 +341,16 @@ an active tunnel and verifying state recovery after reboot.
   the new password MUST be rejected with an inline explanation, and the
   stored credential MUST stay exactly as it was.
 - **A client without an administrative session reaching the credentials
-  form**: the form and its action MUST be unreachable, and the stored
-  credential MUST NOT be readable.
+  form**: the **panel form** MUST be unreachable — the LuCI page itself is
+  behind the router's administrative login — and the stored credential MUST
+  NOT be readable (no response, page source or log ever carries a secret,
+  FR-021/FR-033). The underlying ubus action, like the rest of the
+  `saadway` surface, is **LAN-scoped** rather than session-gated: the
+  dashboard's access control is the platform's network boundary (the
+  LAN-bound listener + the firewall's WAN input policy). That withdrawal of
+  the session gate is the recorded deviation of `docs/verify-2512.md` §7
+  (amended 2026-10-21 with the auth bypass) — this edge case states the
+  shipped model, not an isolation the dashboard no longer has.
 
 ## Clarifications
 
