@@ -210,7 +210,7 @@
 				"<label>" + esc(T("import_pass")) + "</label>" +
 				'<input id="imp-pass" type="password">' +
 				"</fieldset>" +
-				'<button class="btn primary" data-act="import">' + esc(T("import_btn")) +
+				'<button type="button" class="btn primary" data-act="import">' + esc(T("import_btn")) +
 				"</button></div>" +
 				'<div class="card"><h3>' + esc(T("ike_title")) + "</h3>" +
 				"<label>" + esc(T("ike_name")) + "</label>" +
@@ -247,7 +247,7 @@
 				 * form displays it, it does not offer it. */
 				"<label>" + esc(T("ike_enc")) + "</label>" +
 				'<p class="muted">' + esc(T("ike_enc_value")) + "</p>" +
-				'<button class="btn primary" data-act="ike-create">' +
+				'<button type="button" class="btn primary" data-act="ike-create">' +
 				esc(T("ike_create")) + "</button></div>" +
 				(profile_edit_card());
 			/* FR-004: a custom identity is only asked for when it is
@@ -282,9 +282,13 @@
 	function panel_click(ev) {
 		var btn = ev.target.closest("button[data-act]");
 		if (!btn) return;
-		var act = btn.getAttribute("data-act");
 		var panel = btn.closest("section");
 		var pid = panel ? panel.id : "";
+		/* T103: the profiles panel owns these actions; the other panels'
+		 * buttons are handled by panel_events() — without this scope
+		 * the fall-through would feed them here as well. */
+		if (pid !== "panel-profiles") return;
+		var act = btn.getAttribute("data-act");
 
 		if (act === "activate") {
 			SwApi.saadway("profile.activate", { name: btn.getAttribute("data-name") })
@@ -424,10 +428,9 @@
 	}
 
 	function err_of(r) {
-		if (r.error && r.error.message)
-			return String(r.error.message);
-		if (r.data && r.data.detail)
-			return String(r.data.detail);
+		/* T103: the daemon's detail first, then the mapped ubus status */
+		var d = window.SwApi.describe ? window.SwApi.describe(r) : null;
+		if (d) return d;
 		return T("save_error");
 	}
 
@@ -778,7 +781,12 @@
 				});
 				return;
 			}
-			return;
+			/* T103: the actions this block does NOT own belong to the
+			 * profiles panel — fall through to panel_click(). The
+			 * unconditional "return;" that used to end this block
+			 * made every profiles action (import, ike-create,
+			 * activate, deactivate, edit, delete) unreachable:
+			 * the click produced no reaction and no error. */
 		}
 		/* clicked row buttons (profiles table) */
 		panel_click(ev);

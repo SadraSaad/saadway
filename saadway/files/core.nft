@@ -35,6 +35,19 @@ table inet saadway {
 		type ipv4_addr
 		flags interval
 	}
+	# per-device exit policy (T103: a set is emitted ONLY when it has
+	# elements, and the element list is comma-separated — nftables
+	# rejects an empty "elements = { }" and a ";" terminator, which
+	# would make the WHOLE table fail to load):
+	set dev_ip {
+		type ipv4_addr
+		flags interval
+		elements = { 192.168.1.50/32 }
+	}
+	set dev_mac {
+		type ether_addr
+		elements = { aa:bb:cc:dd:ee:ff }
+	}
 
 	# --- marking (prerouting, mangle stage) ------------------------------
 	chain mark_prerouting {

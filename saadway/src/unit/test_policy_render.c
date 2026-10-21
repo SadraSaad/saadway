@@ -159,6 +159,103 @@ static void test_render_no_banned_tools(void **state)
 	free(out);
 }
 
+/* ------------------------------------------------------------------ */
+/* T103: the per-device sets must be VALID nftables.                    */
+/*                                                                    */
+/* The renderer used to emit BOTH sets whenever either kind of rule   */
+/* existed, with a ";" terminator and a shared separator counter:     */
+/*   - a single IP rule produced "elements = { ; }" for dev_mac,      */
+/*   - a MAC rule that was not the first rule produced a leading ", ".*/
+/* Both are syntax errors: nft rejects the WHOLE table, the          */
+/* delete+create transaction fails, the create-only retry fails with  */
+/* the same content, and the daemon falls back to the emergency       */
+/* containment (the tunnel-class egress blackholed).                   */
+/* ------------------------------------------------------------------ */
+
+/* the rendered table must never contain a malformed element list */
+static void assert_no_malformed_sets(const char *out)
+{
+	assert_null(strstr(out, "elements = { ; }"));
+	assert_null(strstr(out, "elements = { ,"));
+	assert_null(strstr(out, "; } }"));
+}
+
+static void test_render_device_sets_both_kinds(void **state)
+{
+	char *out = NULL;
+	size_t len = 0;
+
+	(void)state;
+	seed_ctx(&test);
+	assert_return_code(sw_policy_render(&test, true, "tun_x", false, &out,
+					   &len), 0);
+	/* the IP rule and the MAC rule (lowercased) - comma syntax */
+	assert_non_null(strstr(out,
+		"set dev_ip { type ipv4_addr; flags interval; elements = { 192.168.1.23 } }"));
+	assert_non_null(strstr(out,
+		"set dev_mac { type ether_addr; elements = { aa:bb:cc:dd:ee:ff } }"));
+	/* no leading separator before the MAC element */
+	assert_null(strstr(out, "elements = { ,"));
+	assert_no_malformed_sets(out);
+	free(out);
+}
+
+static void test_render_device_sets_ip_only(void **state)
+{
+	char *out = NULL;
+	size_t len = 0;
+
+	(void)state;
+	seed_ctx(&test);
+	/* keep only the IP rule */
+	test.st.devices->next = NULL;
+
+	assert_return_code(sw_policy_render(&test, true, "tun_x", false, &out,
+					   &len), 0);
+	assert_non_null(strstr(out,
+		"set dev_ip { type ipv4_addr; flags interval; elements = { 192.168.1.23 } }"));
+	/* the empty set must NOT be emitted at all */
+	assert_null(strstr(out, "set dev_mac"));
+	assert_no_malformed_sets(out);
+	free(out);
+}
+
+static void test_render_device_sets_mac_only(void **state)
+{
+	char *out = NULL;
+	size_t len = 0;
+
+	(void)state;
+	seed_ctx(&test);
+	/* keep only the MAC rule */
+	test.st.devices = test.st.devices->next;
+
+	assert_return_code(sw_policy_render(&test, true, "tun_x", false, &out,
+					   &len), 0);
+	assert_non_null(strstr(out,
+		"set dev_mac { type ether_addr; elements = { aa:bb:cc:dd:ee:ff } }"));
+	assert_null(strstr(out, "set dev_ip"));
+	assert_no_malformed_sets(out);
+	free(out);
+}
+
+static void test_render_device_sets_none(void **state)
+{
+	char *out = NULL;
+	size_t len = 0;
+
+	(void)state;
+	seed_ctx(&test);
+	test.st.devices = NULL;
+
+	assert_return_code(sw_policy_render(&test, true, "tun_x", false, &out,
+					   &len), 0);
+	assert_null(strstr(out, "set dev_ip"));
+	assert_null(strstr(out, "set dev_mac"));
+	assert_no_malformed_sets(out);
+	free(out);
+}
+
 int main(void)
 {
 	const struct CMUnitTest tests[] = {
@@ -167,6 +264,10 @@ int main(void)
 		cmocka_unit_test(test_render_cold_catch_all_drop),
 		cmocka_unit_test(test_render_dns_redirect_and_exemptions),
 		cmocka_unit_test(test_render_no_banned_tools),
+		cmocka_unit_test(test_render_device_sets_both_kinds),
+		cmocka_unit_test(test_render_device_sets_ip_only),
+		cmocka_unit_test(test_render_device_sets_mac_only),
+		cmocka_unit_test(test_render_device_sets_none),
 	};
 	return cmocka_run_group_tests(tests, NULL, NULL);
 }

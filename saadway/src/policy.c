@@ -28,7 +28,47 @@
 /* bounded child execution helpers (Principle II: no unbounded waits)   */
 /* ------------------------------------------------------------------ */
 
-static int run_argv(char *const argv[], int timeout_ms)
+/* T103: nft's own error text (the parse error) used to be discarded -
+ * the child ran with stdout AND stderr on /dev/null, so a rejected
+ * ruleset only produced a bare "rc=1" and the failure was
+ * undiagnosable. The child's stderr now lands in a 0600 file next to the
+ * render file and is logged with the failing transaction. */
+static char nft_errfile[SW_PATH_MAX];
+static char nft_errbuf[512];
+
+static void read_nft_err(const char *file, char *buf, size_t len)
+{
+	int fd;
+	ssize_t n;
+
+	if (!buf || !len)
+		return;
+	buf[0] = 0;
+	if (!file || !file[0])
+		return;
+	fd = open(file, O_RDONLY);
+	if (fd < 0)
+		return;
+	n = read(fd, buf, len - 1);
+	close(fd);
+	if (n <= 0) {
+		buf[0] = 0;
+		return;
+	}
+	buf[n] = 0;
+	/* one line, no trailing newline */
+	for (size_t i = 0; i < (size_t)n; i++)
+		if (buf[i] == '\n' || buf[i] == '\r') {
+			buf[i] = 0;
+			break;
+		}
+}
+
+/* T103: the child's stderr is captured into `errfile` (when given) so a
+ * rejected ruleset reports nft's OWN parse error instead of a bare
+ * "rc=1" - the old helper sent stdout AND stderr to /dev/null. */
+static int run_argv(char *const argv[], int timeout_ms,
+		    const char *errfile)
 {
 	pid_t pid = fork();
 	if (pid == 0) {
@@ -37,6 +77,15 @@ static int run_argv(char *const argv[], int timeout_ms)
 			if (fd >= 0) {
 				dup2(fd, i);
 				if (fd != i)
+					close(fd);
+			}
+		}
+		if (errfile) {
+			int fd = open(errfile, O_WRONLY | O_CREAT | O_TRUNC,
+				      0600);
+			if (fd >= 0) {
+				dup2(fd, STDERR_FILENO);
+				if (fd != STDERR_FILENO)
 					close(fd);
 			}
 		}
@@ -220,32 +269,42 @@ static void render_iifname_set(struct sw_ctx *c, struct sw_strbuf *sb)
 static void render_dev_sets(struct sw_ctx *c, struct sw_strbuf *sb)
 {
 	struct sw_strbuf ipel, macel;
-	int n = 0;
+	int nip = 0, nmac = 0;
 
 	sw_sb_init(&ipel);
 	sw_sb_init(&macel);
-	for (struct sw_device_rule *d = c->st.devices; d; d = d->next, n++) {
+	for (struct sw_device_rule *d = c->st.devices; d; d = d->next) {
+		/* T103: the separator counter is PER LIST - the old shared
+		 * counter produced a leading ", " whenever the second kind
+		 * of rule was not the first rule. */
 		if (d->match_type == SW_MTYPE_IP)
-			sw_sb_appendf(&ipel, "%s%s", n ? ", " : "", d->match_value);
+			sw_sb_appendf(&ipel, "%s%s", nip++ ? ", " : "",
+				      d->match_value);
 		else {
 			char lc[24];
 			int i;
 			for (i = 0; i < 17; i++)
 				lc[i] = (char)tolower((unsigned char)d->match_value[i]);
 			lc[17] = 0;
-			sw_sb_appendf(&macel, "%s%s", n ? ", " : "", lc);
+			sw_sb_appendf(&macel, "%s%s", nmac++ ? ", " : "", lc);
 		}
 	}
-	if (ipel.len || macel.len) {
-		sw_sb_append(sb,
-			"\tset dev_ip { type ipv4_addr; flags interval; elements = { ");
-		sw_sb_append(sb, ipel.b ? ipel.b : "");
-		sw_sb_append(sb, "; } }\n");
-		sw_sb_append(sb,
-			"\tset dev_mac { type ether_addr; elements = { ");
-		sw_sb_append(sb, macel.b ? macel.b : "");
-		sw_sb_append(sb, "; } }\n");
-	}
+	/* T103: each set is emitted ONLY when it has elements, and the
+	 * element list uses nftables' comma syntax ("elements = { a, b }").
+	 * The old rendering always emitted BOTH sets with a ";" terminator,
+	 * so a single-rule configuration produced "elements = { ; }" - a
+	 * syntax error that made the WHOLE table fail to load: the
+	 * delete+create transaction failed, the create-only retry failed
+	 * with the same content, and the daemon fell back to the
+	 * emergency containment (the tunnel-class egress blackholed). */
+	if (ipel.len)
+		sw_sb_appendf(sb,
+			"\tset dev_ip { type ipv4_addr; flags interval; elements = { %s } }\n",
+			ipel.b);
+	if (macel.len)
+		sw_sb_appendf(sb,
+			"\tset dev_mac { type ether_addr; elements = { %s } }\n",
+			macel.b);
 	sw_sb_free(&ipel);
 	sw_sb_free(&macel);
 }
@@ -355,6 +414,10 @@ static int apply_nft_transaction(const char *ruleset)
 	char *body;
 	int rc;
 
+	/* the capture file for nft's stderr (T103) */
+	snprintf(nft_errfile, sizeof(nft_errfile), "%s.err", SW_NFT_RENDER);
+	nft_errbuf[0] = 0;
+
 	/* attempt one: delete+create inside ONE transaction (atomic,
 	 * the same replace technique fw4 itself uses) */
 	sw_sb_init(&fb);
@@ -371,20 +434,29 @@ static int apply_nft_transaction(const char *ruleset)
 	}
 	{
 		char *argv[] = { SW_NFT_BIN, "-f", SW_NFT_RENDER, NULL };
-		rc = run_argv(argv, SW_T_POLICY_APPLY * 1000);
+		rc = run_argv(argv, SW_T_POLICY_APPLY * 1000, nft_errfile);
 	}
 	if (rc != 0) {
 		/* fallback (first boot / table absent): create-only, still
 		 * one atomic transaction */
-		sw_warn("policy: delete+create txn failed (rc=%d); "
-			"retrying as create-only", rc);
+		read_nft_err(nft_errfile, nft_errbuf, sizeof(nft_errbuf));
+		sw_warn("policy: delete+create txn failed (rc=%d)%s%s; "
+			"retrying as create-only", rc,
+			nft_errbuf[0] ? ": " : "", nft_errbuf);
 		rc = sw_util_write_file_mode(SW_NFT_RENDER, ruleset,
 					     strlen(ruleset), 0644);
 		if (rc != 0)
 			return -1;
 		{
 			char *argv[] = { SW_NFT_BIN, "-f", SW_NFT_RENDER, NULL };
-			rc = run_argv(argv, SW_T_POLICY_APPLY * 1000);
+			rc = run_argv(argv, SW_T_POLICY_APPLY * 1000, nft_errfile);
+			if (rc != 0) {
+				read_nft_err(nft_errfile, nft_errbuf,
+					     sizeof(nft_errbuf));
+				sw_err("policy: create-only txn FAILED rc=%d%s%s",
+				       rc, nft_errbuf[0] ? ": " : "",
+				       nft_errbuf);
+			}
 		}
 	}
 	return rc;
@@ -407,7 +479,7 @@ static int iprule_add(const char *prio, const char *match, const char *table)
 	args[n++] = "table";
 	snprintf(tb_buf, sizeof(tb_buf), "%s", table);
 	args[n++] = tb_buf;
-	return run_argv((char *const *)args, 1500);
+	return run_argv((char *const *)args, 1500, nft_errfile);
 }
 
 static int iprule_del_prio(int prio)
@@ -423,7 +495,7 @@ static int iprule_del_prio(int prio)
 	args[n++] = "prio";
 	snprintf(pr_buf, sizeof(pr_buf), "%d", prio);
 	args[n++] = pr_buf;
-	rc = run_argv((char *const *)args, 1500);
+	rc = run_argv((char *const *)args, 1500, nft_errfile);
 	return rc;
 }
 
@@ -506,7 +578,7 @@ static int apply_route(struct sw_ctx *c, const char *tun_if, bool route_default)
 	args[n++] = "table";
 	snprintf(tb_buf, sizeof(tb_buf), "%d", SW_TABLE_TUNNEL);
 	args[n++] = tb_buf;
-	return run_argv((char *const *)args, 3000);
+	return run_argv((char *const *)args, 3000, nft_errfile);
 }
 
 int sw_policy_apply(struct sw_ctx *c, bool contain, const char *tun_if,

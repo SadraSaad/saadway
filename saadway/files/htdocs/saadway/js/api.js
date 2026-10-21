@@ -95,8 +95,36 @@ window.SwApi = (function () {
 
 	function saadway(method, msg) { return call(OBJ, method, msg); }
 
+	/* T103: the transport's own error text is generic ("Access denied",
+	 * "Invalid argument"); the daemon's own detail (the E_* codes) is
+	 * preferred, and the raw ubus status is mapped to a readable
+	 * fallback so a failure is never reported as an opaque save error.
+	 * The ubus status codes are the upstream 0-based enum
+	 * (openwrt/ubus ubusmsg.h). */
+	var STATUS_TEXT = {
+		1: "command failed",
+		2: "invalid argument",
+		3: "method not found",
+		4: "not found",
+		5: "unknown error",
+		6: "permission denied",
+		7: "timeout",
+		8: "connection failed",
+		9: "unknown error",
+		10: "connection failed",
+	};
+
+	function describe(res) {
+		if (!res) return null;
+		if (res.error && res.error.message) return String(res.error.message);
+		if (res.data && res.data.detail) return String(res.data.detail);
+		if (res.code && STATUS_TEXT[res.code]) return STATUS_TEXT[res.code];
+		return null;
+	}
+
 	return {
 		call: call,
 		saadway: saadway,
+		describe: describe,
 	};
 })();
