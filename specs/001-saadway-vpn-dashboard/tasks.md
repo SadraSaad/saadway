@@ -982,3 +982,178 @@ initializes the default credential"). `tests/leak-check.sh` needs
 `WTN_WAN_DEV` (an on-device check; unchanged).
 
 **Checkpoint**: the LuCI page renders both tabs against the service's own UCI coordinates (no JavaScript error, no empty section, no uci permission error), the standalone dashboard opens and operates with **no** credential prompt and **no** session token, its authorization is exactly the 21-method `unauthenticated` group (the credential method and the service toggle stay out of reach), the first-boot path no longer ships a well-known password, the host-side audits prove the new state and the pre-change failures, and the withdrawn protection plus its compensating controls and residual risk are recorded as a deviation.
+
+## Phase 25: Convergence — spec/plan/code gap closure (2026-10-21)
+
+**Purpose**: the convergence assessment of 2026-10-21 compared the shipped
+code against `spec.md` (35 FRs, 13 SCs, 6 user stories), `plan.md` (the
+project structure, the module list, the package touch-points, the transport
+contract, the test strategy) and the constitution (v1.2.0 — principles I–VI
+and the seven quality gates). It found **no** missing and **no** contradicting
+work: 8 partial gaps and 1 unrequested artifact remained. The on-device
+items are already tracked as **T046** and **T057** (device-bound) and are
+NOT re-appended here.
+
+- [ ] T082: Extend the standalone dashboard's IKEv2 form with the FR-004 connection settings and the FR-005 encryption readout per FR-004, FR-005 (partial) — target file: `saadway/files/htdocs/saadway/js/app.js`:
+  - The IKEv2 card currently renders **only** `name`, `hostname`, `username`
+    and `password` (`js/app.js:151-161`). FR-004 requires the form to
+    provide the connection settings with the stated defaults — **Type** =
+    IKEv2 · username auth (MSCHAPv2); **Remote ID** = "Same as hostname";
+    **Local ID** = "Same as username"; **Certificate** = "Leave default ·
+    from server"; **Proxy** = Off — and each of them MUST be overridable
+    with the "Same as …" options preserved.
+  - The daemon already applies those defaults and the API already accepts
+    the overrides (`contracts/api.md`: `profile.create_ikev2 { name,
+    hostname, username, password, remote_id?, local_id?, cert_mode?,
+    proposal_*? }`; the defaults live in `saadway/src/uci-state.c:629-632`
+    as `same-as-hostname` / `same-as-username` / `from-server` / `off`) —
+    the gap is **UI-only**: add the four fields (selects whose first entry
+    is the "Same as …" value, plus the certificate and proxy modes) and
+    send them in the `profile.create_ikev2` payload.
+  - FR-005 additionally requires the form to **display** the automatically
+    negotiated encryption — Cipher: AES-256-GCM; Integrity: SHA-256; Key
+    exchange: DH group 20 (ECP384); iOS key exchange: DH group 21 (ECP521)
+    (the daemon emits `aes256gcm16-prfsha256-ecp384-ecp521`,
+    `saadway/src/tunnel-ikev2.c:5-6`) — add it as a static, translated
+    readout next to the form.
+  - The new labels MUST be added to **both** locales
+    (`saadway/files/htdocs/saadway/i18n/en.json` +
+    `i18n/fa.json`) so the parity stays 1:1, and the daemon's accepted
+    values MUST match the form's option values exactly (`same-as-hostname`,
+    `same-as-username`, `from-server`, `off`) — the daemon ignores unknown
+    values and falls back to its defaults.
+  - Verification: the SPA parses (`node --check`), the i18n locales stay
+    1:1, `tests/luci-spa-audit.sh` stays green, and the created profile's
+    `remote_id`/`local_id`/`cert_mode`/`proxy` are observable in
+    `/etc/config/saadway` (on-device proof folded into T046/T057).
+
+- [ ] T083: Fix the undefined behaviour in the WAN-interface enumeration per FR-011, FR-014 (partial) — target file: `saadway/src/policy.c`:
+  - `saadway/src/policy.c:163` reads and modifies `nwans` in one expression
+    without a sequence point — `wans[nwans++] = wan_names[nwans];` — which
+    the compiler flags as `-Wsequence-point` ("operation on 'nwans' may be
+    undefined"). The right-hand read MAY observe the incremented index, so
+    a **wild pointer** can enter the WAN-interface list that the nftables
+    renderer later dereferences (a daemon crash in the policy path — not a
+    fail-closed outcome, Constitution IV).
+  - Sequence the two operations explicitly (assign first, increment after)
+    and keep/extend the array bound check so the enumeration cannot write
+    past `wan_names`/`wans`.
+  - Verification: `gcc -fsyntax-only -std=c11 -Wall -Wextra` on
+    `saadway/src/policy.c` is clean of the sequence-point warning, the
+    unit suite stays green, and `tests/link-audit.sh` resolves the module.
+
+- [ ] T084: Remove the undefined behaviour from the profile-name normalization helper per FR-006 (partial) — target file: `saadway/src/uci-state.c`:
+  - `saadway/src/uci-state.c:376` — `dst[o++] = (char)(o ? c : 'a');` —
+    reads and modifies `o` without a sequence point (`-Wsequence-point`).
+    The helper `sw_util_normalize_name()` currently has **no caller** (it
+    is dead code), so the defect is latent; either sequence the operations
+    correctly (read `o` into a local before the increment) or delete the
+    dead helper and its declaration in `saadway/src/saadway.h` — the
+    decision MUST be recorded in the commit message.
+  - Verification: the module compiles clean under `-Wall -Wextra`, the
+    unit suite stays green, and `tests/link-audit.sh` still resolves every
+    daemon-internal symbol.
+
+- [ ] T085: Give the OpenVPN import form its own titled credential section per FR-002 (partial) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
+  - FR-002 requires a section titled *"Section to add an optional
+    'auth-user-pass' file with your credentials"* where the username and
+    password may optionally be entered. The optional fields ARE present
+    and functional (`imp-user` / `imp-pass` → `credentials: { username,
+    password }` per `contracts/api.md`), but they sit inline in the import
+    card with no section of their own.
+  - Split the credential block into its own titled sub-section inside the
+    import card, with the title as a **new** i18n key in both locales
+    (the parity must stay 1:1). The section MUST remain optional: an empty
+    username must omit `credentials` from the payload entirely (the current
+    behaviour) — never send an empty credential pair.
+  - Verification: the SPA parses, the locales are 1:1, and the import of a
+    profile with and without credentials still behaves as before (the
+    secret lands in the 0600 `auth-user-pass` file, never in UCI).
+
+- [ ] T086: Clear the compiler warnings in the daemon modules per Constitution I (partial) — target files: `saadway/src/ubus.c`, `saadway/src/tunnel-openvpn.c`, `saadway/src/counters.c`:
+  - Five unused variables remain: `saadway/src/ubus.c:1049` (`lv`, `cv` in
+    `h_mon_logs`), `saadway/src/tunnel-openvpn.c:156` (`rst`) and `:204`
+    (`ret`), `saadway/src/counters.c:21` (`v`). Remove them (or use them
+    where the value was clearly meant to be used — e.g. the log cursor
+    variables in `h_mon_logs`).
+  - The whole daemon MUST compile clean under
+    `gcc -fsyntax-only -std=c11 -Wall -Wextra` — all **14** modules, not
+    just the touched ones. This is the check that would have caught the two
+    sequence-point defects (T083/T084).
+  - Verification: the sweep over the 14 modules reports **0** warnings, the
+    unit suite stays green, and `tests/link-audit.sh` stays green.
+
+- [ ] T087: Make the dashboard's language preference single-sourced per FR-027 (partial) — target files: `saadway/src/uci-state.c`, `saadway/files/htdocs/saadway/js/i18n.js`:
+  - The SPA keeps the language in the browser's `localStorage`
+    (`js/i18n.js:14`, key `saadway.lang`) while the daemon reads and
+    re-persists a `dashboard.language` UCI option
+    (`saadway/src/uci-state.c:849` reads it, `:1255` writes it back) that
+    **no surface can change** — it is a constant that can silently drift
+    from the browser's preference (and it is part of the backup schema,
+    `saadway/src/backup.c:284`).
+  - Pick ONE authoritative surface and make the other follow. The
+    LAN-scoped dashboard has no UCI write access (the `unauthenticated`
+    ACL group carries no `uci` scope — FR-035), so the browser's
+    `localStorage` MUST remain the dashboard's own preference and the UCI
+    option MUST stop being presented as a setting: remove the
+    `dashboard.language` read/write round-trip in
+    `saadway/src/uci-state.c` (and its entry in the backup schema) or
+    document it explicitly as the **daemon-side default** that the SPA
+    falls back to. The decision MUST be recorded in
+    `specs/001-saadway-vpn-dashboard/contracts/uci.md`.
+  - Verification: the daemon compiles clean, the unit suite stays green,
+    the backup round-trip (`tests/restore-roundtrip.sh`) stays green, and
+    the SPA still restores the browser's language preference across a
+    reload.
+
+- [ ] T088: Reconcile the root-only credential ACL group with the post-bypass reality per FR-034 (unrequested) — target files: `luci-app-saadway/root/usr/share/rpcd/acl.d/saadway-credentials.json`, `tests/credential-flow-audit.sh`:
+  - The group still describes itself as the **root-only** gate for
+    `saadway.mgmt.credentials.set`, but since the auth bypass the
+    LAN-scoped `unauthenticated` group covers the whole `saadway` object —
+    the method is reachable from the LAN regardless of this group, so the
+    description overstates the isolation (the withdrawal is recorded in
+    `docs/verify-2512.md` §7).
+  - Keep the group (it is the narrower grant and stays the correct gate
+    for a future tightening of the wildcard) but **re-document** it: it
+    MUST NOT claim exclusivity it no longer has. Alternatively delete the
+    file and its install rule in `luci-app-saadway/Makefile` — the
+    decision MUST be recorded.
+  - `tests/credential-flow-audit.sh` check E currently asserts that the
+    dashboard's `saadway` group does **not** contain
+    `mgmt.credentials.set` — after the wildcard that assertion is
+    **vacuously true** (the literal method name never appears; the group
+    holds `*`). Make check E assert something real: that the
+    `saadway-credentials` group grants exactly one method and that the
+    audit's verdict on the `saadway` group's coverage is stated explicitly
+    (the wildcard covers the method — recorded as a deviation, not hidden).
+  - Verification: the audit stays green and its negative run (the pre-T079
+    tree) still fails, and the ACL file remains valid JSON.
+
+- [ ] T089: Align the plan's project-structure tree with the shipped tree per plan: project structure (partial) — target file: `specs/001-saadway-vpn-dashboard/plan.md`:
+  - The structure tree names `tests/smoke-switching.sh` — a script that
+    does not exist (the on-device switching/leak coverage is
+    `tests/smoke-container.sh` + `tests/leak-check.sh`) — and omits the
+    four audits added since the tree was written:
+    `tests/luci-spa-audit.sh`, `tests/pkg-metadata-audit.sh`,
+    `tests/service-startup-audit.sh`, `tests/uci-defaults-audit.sh`.
+  - Update **only** the structure tree (the plan's decisions and the
+    amended-design sections stay untouched); the tree MUST list the files
+    that actually ship.
+  - Verification: every path named in the tree exists in the repository
+    (a `find`-based existence check over the tree's file names).
+
+- [ ] T090: Drop the retired session-error string from the dashboard locales per FR-020 (partial) — target files: `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
+  - `err_http_401` ("Invalid session — log in again" / "نشست نامعتبر — دوباره
+    وارد شوید") is unreferenced since the dashboard became tokenless
+    (T079) — there is no session to invalidate.
+  - Remove the key from **both** locales (the parity must stay 1:1) and
+    grep the shipped SPA for any remaining reference to it.
+  - Verification: the SPA parses, the locales are 1:1, and no shipped
+    JavaScript references the removed key.
+
+**Checkpoint**: the shipped code satisfies every requirement of the amended
+specification except the nine items above; the two sequence-point defects
+are gone and the daemon compiles clean under `-Wall -Wextra`, the IKEv2
+form offers the FR-004/FR-005 surface the API already supports, the
+access-control artifacts describe the post-bypass reality, and the plan's
+structure tree matches the tree that ships.
