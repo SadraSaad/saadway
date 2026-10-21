@@ -147,6 +147,34 @@ FR-034):
   *customized* (set through the LuCI credentials form, effective for the
   next login immediately).
 
+**State transitions** (all applied in ONE atomic operation — the shadow
+account, the login mapping and the rpcd reload; a failure at any step
+leaves the previous credential intact and usable):
+
+```text
+             fresh install
+   (absent) ───────────────► default (admin / admin, hash in /etc/shadow)
+        │                            │
+        │                            │  LuCI tab: Save & Apply
+        │                            ▼
+        │                      customized (new username + password)
+        │                            │
+        │                            │  username change ⇒ new shadow
+        │                            │  account created FIRST, then the
+        │                            │  mapping (username + '$p$<user>')
+        │                            ▼
+        └────────────────────► renamed (old mapping superseded; the
+                                 previous account keeps its restricted
+                                 row, but no login section references it)
+```
+
+- The `$p$` suffix always equals the account name — a mapping pointing at a
+  non-existent account fails closed (rpcd: `getspnam` → no row → the
+  login is denied).
+- Re-running the first-boot initialization on an existing account is a
+  **no-op** for the credential: the default is applied only when the
+  account does not exist yet.
+
 ## Entity: DashboardSession
 
 Handling via uhttpd-mod-ubus ubus sessions (research D7; rpcd shadow bridge
@@ -179,7 +207,7 @@ mechanics source-verified in docs/verify-2512.md §2):
 
 ```
 /etc/config/saadway                 ← sole persistent state (UCI)
-/etc/config/rpcd                    ← saadway_admin login section ('$p$' → /etc/shadow)
+/etc/config/rpcd                    ← saadway_login login section ('$p$' → /etc/shadow)
 /etc/shadow (admin)                 ← 0600 hash, provisioned by /usr/libexec/saadway/provision
 /etc/saadway/secrets/<profile>/     ← 0600 auth-user-pass / swanctl secrets
 /etc/saadway/run/openvpn/*.conf     ← rendered OpenVPN configs (0600)

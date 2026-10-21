@@ -35,8 +35,37 @@ in `/etc/shadow`, referenced from `/etc/config/rpcd` as
 `option password '$p$admin'` (uci-defaults/50-saadway-rpcd +
 `saadway-provision`). The dashboard ships with the default credential
 `admin` / `admin`; the password is applied by `saadway-provision` over
-stdin and is changed with `saadway-provision passwd`. The option values here
-are presentation/lifecycle preferences only.
+stdin and is changed with `saadway-provision passwd` or from the LuCI
+credentials tab. The option values here are presentation/lifecycle
+preferences only.
+
+### The login mapping in `/etc/config/rpcd` (not part of `/etc/config/saadway`)
+
+```conf
+config login 'saadway_login'
+    option username 'admin'
+    option password '$p$admin'
+    list read 'saadway'
+    list write 'saadway'
+```
+
+- The section name is cosmetic — rpcd matches a login section by its
+  `username` option; it is named `saadway_login` and is maintained
+  idempotently by `saadway/files/uci-defaults/50-saadway-rpcd` (create only
+  when missing, always refresh `username`/`password`, `uci commit rpcd`).
+- `option password '$p$<user>'` is a **reference**, not a secret: the hash
+  stays in the 0600 `/etc/shadow`. The `<user>` suffix MUST equal the
+  account name — upstream resolves it with `getspnam(<name>)` and compares
+  with `crypt(3)`; a missing shadow row fails the login (fail closed).
+- The ACL lists stay `saadway` (least privilege). The credential-change
+  method is granted through a **separate** ACL group
+  (`saadway-credentials`, file
+  `luci-app-saadway/root/usr/share/rpcd/acl.d/saadway-credentials.json`)
+  that the dashboard's session does not obtain — only the router's stock
+  root session does (group `*`).
+- A rename (the LuCI tab's "New Username") updates `username` **and** the
+  `$p$` suffix together, and creates the new shadow account first — the
+  mapping is never left pointing at a non-existent account.
 
 ## Section types
 

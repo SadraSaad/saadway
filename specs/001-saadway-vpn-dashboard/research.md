@@ -302,12 +302,42 @@ default with "wrong username or password". The credential is a lifecycle
 concern of the dashboard's login, so keeping its single form in the panel
 does not erode the decoupling the standalone dashboard exists for.
 
+**Implementation-level facts (verified 2026-10-21, upstream is the
+oracle):**
+- OpenWrt ships rpcd's plugins as **separate packages**
+  (`package/system/rpcd/Makefile` → `BuildPlugin`): `rpcd-mod-file`,
+  `rpcd-mod-rpcsys` ("ubus calls for sysupgrade and **password changing**"),
+  `rpcd-mod-iwinfo`, `rpcd-mod-ucode`. The stock `rpcd` binary contains
+  none of them → the design must not depend on a plugin being installed.
+- `rpcd-mod-rpcsys`'s `rpc-sys password_set` (`openwrt/rpcd` `sys.c:81-141`)
+  takes `{ user, password }`, **forks `/bin/passwd <user>` and writes the
+  password to the child's stdin** (never argv; 100 ms read timeout) — the
+  platform's `passwd` does the crypt(3) hashing into the 0600
+  `/etc/shadow`. Our helper follows the same mechanism, so no hashing
+  logic exists in our code at all.
+- rpcd's `file` plugin exposes `exec`, gated per path by the ACL scope
+  `"file"` (`file.c` → `rpc_file_access(sid, path, "exec")`; fnmatch
+  matching in `session.c`). **Not used**: granting `exec` re-opens the
+  historical LuCI remote-command surface for no gain.
+- LuCI's tab strip is `ui.tabs` (`ui.js:4614-4700`, `data-tab` /
+  `data-tab-title` panes) and its form engine supports tabs natively
+  (`form.js:988-1110`: `tab(name, title, description)` +
+  `taboption(tabName, class, …)`); a `form.Map` renders the standard
+  **"Save & Apply"** action.
+
 **Alternatives considered**: managing the credential inside the standalone
 dashboard (would put a credential-change surface behind a credential, and
 it contradicts the dual-UI split); keeping a shell-only path (reproduces
 the reported failure mode); storing the secret in the service's own
 configuration (violates FR-021 / Constitution IV — the platform already
-provides a restricted, non-readable store).
+provides a restricted, non-readable store); a literal hash in
+`/etc/config/rpcd` (world-readable credential — rejected); `openssl passwd
+-1` (new dependency + MD5 — rejected); a browser-side UCI write (no
+crypt(3) in the browser, non-atomic — rejected); rpcd's `file.exec`
+(re-opens the LuCI remote-command surface — rejected); `rpcd-mod-rpcsys`'s
+`password_set` for the browser path (an extra package dependency and a
+split, non-atomic flow — the password would change before the login
+mapping).
 
 ## Open questions for build-time verification (tracked, all low-risk)
 

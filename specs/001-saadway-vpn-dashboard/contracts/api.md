@@ -56,6 +56,7 @@ All mutating calls are gated by ACL; all responses redact secrets (FR-021).
 |---|---|---|
 | `mgmt.status` | `{}` → `{ enabled, running, connection_status, active_profile, current_if, uptime_s, session_timeout }` | used by dashboard header + LuCI page; `session_timeout` feeds the login TTL (T053) |
 | `mgmt.set` | `{ enabled: bool }` → `{ applied }` | enable/disable service (LuCI + dashboard) |
+| `mgmt.credentials.set` | `{ username: string, password: string }` → `{ applied }` | **root-only** (ACL group `saadway-credentials`, NOT part of the dashboard's `saadway` group): applies the standalone dashboard's own login credential — the account is created if missing, the password is hashed by the platform's `passwd` (the plaintext is piped, never an argument), `/etc/config/rpcd` section `saadway_login` is updated (`username` + `password '$p$<user>'`) and rpcd is reloaded, so the new credential works immediately (FR-032). Never returns the secret (FR-033); invalid input → 400-class code, no change (FR-031) |
 
 ### Profiles (`profile.*`)
 
@@ -143,6 +144,14 @@ on-device checklist: `docs/verify-2512.md` (T-verify-6, Phase 15/T061).
   unchanged.
 
 No other configuration UI inside LuCI (constitution v1.1.0, Principle V).
+
+The credentials tab is a `form.Map` with two tabs (`tab()` / `taboption()`,
+upstream LuCI) and the standard **Save & Apply** action. Its write path is a
+single ubus call — `saadway.mgmt.credentials.set` — never a browser-side
+UCI write: the browser cannot hash the password, and a half-applied change
+(credentials updated before the login mapping) would lock the
+administrator out. The dashboard's own session has **no** grant for that
+method, so it can never re-key its own login (FR-034).
 
 ## Non-goals
 
