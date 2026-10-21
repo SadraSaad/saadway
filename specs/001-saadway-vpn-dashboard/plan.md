@@ -304,3 +304,71 @@ never re-key its own login.
   (new dependency + MD5); `rpcd-mod-rpcsys`'s `password_set` for the browser
   path (an extra package dependency and a split, non-atomic flow — the
   password would change before the login section).
+
+### Standalone SPA auth bypass (2026-10-21 — constitution v1.2.0, spec FR-020/FR-035)
+
+The maintainer directed that the standalone dashboard MUST be reachable and
+fully operable **without any credential prompt**. Its access control is
+delegated to the platform's network boundary (the LAN-bound uhttpd listener
++ the firewall's WAN input policy).
+
+**Upstream facts (verified 2026-10-21 — upstream is the oracle):**
+- `openwrt/rpcd` `include/rpcd/session.h:35`: `RPC_DEFAULT_SESSION_ID` =
+  `"00000000000000000000000000000000"` — the all-zero session id is rpcd's
+  **default session**, not a magic login token.
+- `openwrt/rpcd` `session.c:1396-1400`: rpcd creates that default session
+  once at startup with `rpc_login_setup_acls(ses, NULL)` (a NULL login
+  section) ⇒ an ACL change reaches the default session only after rpcd
+  restarts — the first-boot script MUST reload rpcd.
+- `openwrt/rpcd` `session.c:944-946` (`rpc_login_test_permission`): with a
+  NULL login section **only** the access group literally named
+  `unauthenticated` is granted ⇒ the ACL group's *name* is the mechanism,
+  not a login section.
+- `openwrt/rpcd` `session.c:606-660` + `:1414`: the authorization check is
+  (scope, object, function) with fnmatch matching; the ACL file's
+  `read`/`write` blocks are the permission buckets used for the
+  login-section match and do **not** narrow the ubus method set.
+- `openwrt/uhttpd` `ubus.c:820-840` + `:280-297`: uhttpd-mod-ubus forwards
+  **every** `/ubus` call to rpcd's `session.access` with the request's
+  `params[0]` as the session id ⇒ a call carrying the all-zero id is checked
+  against the default session's ACLs.
+- `openwrt/rpcd` `uci.c:324-349`: the uci scope is checked as
+  `rpc_session_access(sid, "uci", <config>, "read"|"write")` — the function
+  is literally `read`/`write`, **not** a section name.
+- `openwrt/luci` `modules/luci-base/.../luci.js:1943-1951` + `:2243`:
+  `view` is a **built-in module** (a view MUST declare `'require view';`);
+  `form.js`'s `CBIMap`/`CBINamedSection` bind a form to ONE uci config, and
+  `CBIMap.load` calls `callSessionAccess('uci', <config>, 'write')`.
+
+**Data flow (tokenless):** `/saadway/` (static SPA on the LAN-bound
+listener) → `POST /ubus` with `params[0] = "000…0"` → uhttpd-mod-ubus →
+rpcd `session.access` → the default session's ACLs (the `unauthenticated`
+group) → the `saadway` ubus object. No `session.login`, no
+`ubus_rpc_session`, no token in the DOM.
+
+**Failure modes (fail closed):**
+
+| Condition | Behaviour |
+|---|---|
+| The `unauthenticated` group is missing | Every dashboard call is denied (ubus PERMISSION_DENIED) and the SPA shows the error — there is **no** silent fallback to an authenticated session |
+| rpcd was already running when the ACL file was installed | The default session keeps its old grants → the dashboard is denied until rpcd restarts (the first-boot script reloads rpcd) |
+| A non-`saadway` ubus object is called | Denied — the group covers the `saadway` object only (FR-035) |
+| The listener is reachable from the WAN | The firewall's WAN input policy is the network-layer guard; the first-boot script MUST NOT widen the listener binding |
+
+**Test strategy:** host-side — a new `tests/luci-spa-audit.sh` (T080)
+asserting the ACL group's name/shape, the tokenless SPA transport and the
+absence of a login gate; on-device (T046/T057) — the dashboard opens with no
+prompt, every panel action succeeds, the amended spec's authorization
+behaviour holds, and the dashboard is unreachable from the WAN side.
+
+**Complexity Tracking (this amendment):**
+* **0** new daemon modules, **0** new packages, **0** new runtime
+  dependencies.
+* **−1** SPA session lifecycle (the login gate, the session token and the
+  TTL handling leave the shipped SPA).
+* **+1** ACL group (`unauthenticated` in `saadway/files/rpc-acl.json`).
+* **Rejected alternatives**: uhttpd's `ubus_noauth` (disables the ACL check
+  for **every** ubus object — far too broad); a browser-side credential
+  exchange (re-opens the credential surface this amendment removes);
+  granting the `unauthenticated` group an object other than `saadway`;
+  keeping a well-known default password with no consumer (a liability).

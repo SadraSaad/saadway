@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <!--
-  SaadWay standalone dashboard (T029) — Persian-first RTL SPA.
+  SaadWay standalone dashboard (T029, T079) — Persian-first RTL SPA.
   Served by uhttpd from /www/saadway/ at http://<router>/saadway/.
   The ONLY transport is POST /ubus JSON-RPC 2.0 (uhttpd-mod-ubus, same
-  origin) — js/api.js owns the session-token lifecycle (T030).
+  origin) — js/api.js owns the (tokenless) transport (T030, T079).
 
   Constitution compliance notes:
-  - Principle V: purely client-side SPA; every privileged action passes an
-    authenticated ubus session (login via session.login, ACL least
-    privilege). No CGI, no direct file APIs, no token in URLs/logs.
+  - Principle V (v1.2.0): purely client-side SPA; there is NO login gate and
+    NO session token — every call is authorized as rpcd's default
+    (unauthenticated) session through the 'unauthenticated' ACL group
+    (spec FR-020/FR-035). The dashboard's access control is the platform's
+    network boundary: the LAN-bound uhttpd listener and the firewall's WAN
+    input policy (docs/verify-2512.md §7). No CGI, no direct file APIs, no
+    credential exchange, no token in URLs/logs.
   - Self-hosted only: no CDN, no external fonts/network fetches (offline router).
   - RTL-first (FR-027/Q4-A): Persian default, LTR switch for English.
 -->
@@ -37,22 +41,8 @@
 				<option value="fa">فارسی</option>
 				<option value="en">English</option>
 			</select>
-			<button id="btn-logout" class="btn ghost hidden" data-i18n="logout">خروج</button>
 		</div>
 	</header>
-
-	<!-- login gate (no token in URL; session token only in RAM) -->
-	<section id="view-login" class="card center hidden">
-		<h2 data-i18n="login_title">ورود به داشبورد</h2>
-		<form id="login-form" autocomplete="off">
-			<label for="login-user" data-i18n="username">نام کاربری</label>
-			<input id="login-user" name="username" value="admin" autocapitalize="off" spellcheck="false">
-			<label for="login-pass" data-i18n="password">گذرواژه</label>
-			<input id="login-pass" name="password" type="password" autocomplete="current-password">
-			<button type="submit" class="btn primary" data-i18n="login">ورود</button>
-			<div id="login-err" class="error hidden"></div>
-		</form>
-	</section>
 
 	<!-- main app shell -->
 	<main id="view-app" class="app hidden">

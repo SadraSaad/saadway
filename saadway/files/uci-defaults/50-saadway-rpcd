@@ -1,7 +1,7 @@
 #!/bin/sh
-# 50-saadway-rpcd — rpcd login mapping for the dedicated dashboard user (T032)
+# 50-saadway-rpcd — rpcd login mapping for the optional dashboard session (T032)
 #
-# Auth bridge (FR-020, research D7, constitution Principle IV):
+# Auth bridge (FR-020/FR-035, constitution v1.2.0, research.md D10/D11):
 # - rpcd session.login validates /etc/config/rpcd 'config login' sections via
 #   crypt(3); option password '$p$<user>' = the hash is referenced from
 #   /etc/shadow — so NO credential material ever lands in a world-readable UCI
@@ -13,20 +13,24 @@
 # - Until provisioning has created the user, session.login('admin', …) fails
 #   closed (getspnam lookup fails) — never fail open.
 #
+# T079 (Phase 24 — the auth bypass): the standalone dashboard performs NO
+# login any more; it is authorized as rpcd's default (unauthenticated) session
+# through the 'unauthenticated' ACL group in files/rpc-acl.json. The mapping
+# below is therefore the OPTIONAL operator credential, and:
+#   - the first-boot path MUST NOT provision a well-known default password any
+#     more (no consumer is left for it, and a known password on every device
+#     is a liability): the account is created on demand by the LuCI
+#     credentials tab, which calls `provision set-credentials`;
+#   - the credential mapping is refreshed ONLY when the account exists, so an
+#     operator-set credential is never clobbered by an upgrade;
+#   - the rpcd reload at the end is MANDATORY: rpcd grants the default
+#     session's ACLs once at startup (openwrt/rpcd session.c:1396-1400), so a
+#     running rpcd would keep the old grant set — and the dashboard would
+#     stay permission-denied — until the next reboot.
+#
 # IMPORTANT: the heredoc is quoted ('EOF') so '$p$' reaches uci verbatim.
 
-# 1) Initialize the DEFAULT credential (FR-028): the account is created and
-#    the default password applied on the first boot — but ONLY when the
-#    account does not exist yet, so a package upgrade (which re-installs
-#    this file and re-runs it) never overwrites a credential the
-#    administrator has changed. The helper drives the platform's own crypt(3)
-#    with the plaintext on stdin; the hash lands in the 0600 /etc/shadow.
-if [ -x /usr/libexec/saadway/provision ]; then
-	/usr/libexec/saadway/provision init >/dev/null 2>&1 || \
-		echo "50-saadway-rpcd: default credential initialization failed" >&2
-fi
-
-# 2) The login mapping: create the section only when it is missing — the ACL
+# 1) The login mapping: create the section only when it is missing — the ACL
 #    lists belong to the creation (add_list appends, so re-adding them on an
 #    existing section would duplicate the entries).
 if ! uci -q get rpcd.saadway_login >/dev/null 2>&1; then
@@ -38,23 +42,27 @@ add_list rpcd.saadway_login.write='saadway'
 EOF
 fi
 
-# 3) ALWAYS refresh the credential mapping: an already-provisioned device
-#    still carries the old 'saadway-admin' / '$p$saadway-admin' values and
-#    must be migrated to the 'admin' login (T072).
-uci -q batch <<'EOF'
+# 2) Refresh the credential mapping ONLY when the account exists: on a fresh
+#    device there is no account (the dashboard needs no credential — FR-020),
+#    and an operator-set credential must survive an upgrade untouched.
+if grep -qs '^admin:' /etc/passwd 2>/dev/null; then
+	uci -q batch <<'EOF'
 set rpcd.saadway_login.username='admin'
 set rpcd.saadway_login.password='$p$admin'
 EOF
+fi
 
-# 4) Drop the pre-T072 login section — a stale mapping is a stale credential
+# 3) Drop the pre-T072 login section — a stale mapping is a stale credential
 #    reference (T075).
 uci -q delete rpcd.saadway_admin >/dev/null 2>&1
 
-# 5) uci batch only writes the delta under /tmp/.uci (tmpfs) — without the
-#    commit the login mapping (and the migration) is lost on the next reboot.
+# 4) uci batch only writes the delta under /tmp/.uci (tmpfs) — without the
+#    commit the mapping (and the migration) is lost on the next reboot.
 uci -q commit rpcd
 
-# 6) Make the mapping effective for an already-running rpcd (upgrade path).
+# 5) Make the mapping AND the newly installed ACL groups effective for an
+#    already-running rpcd (upgrade path). Mandatory: rpcd binds the default
+#    session's ACLs at startup (session.c:1396-1400).
 if [ -x /etc/init.d/rpcd ]; then
 	/etc/init.d/rpcd reload >/dev/null 2>&1 || true
 fi

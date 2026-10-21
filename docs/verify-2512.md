@@ -278,6 +278,46 @@ the timeout semantics with blocked targets (`tests/smoke-container.sh`).
   `/tmp/.uci` delta). Enforced by `tests/dashboard-credential-audit.sh`
   (T073).
 
+* **Recorded deviation (Phase 24 / T079) — the standalone dashboard is
+  published to the LAN without a credential.** The maintainer directed on
+  2026-10-21 that opening `/saadway/` MUST show the dashboard directly,
+  with no login prompt, and that its ubus calls MUST succeed without a
+  session token. The ratified spec's FR-020 ("protected by its own
+  username/password … unauthenticated access from any LAN client MUST be
+  denied") is therefore **withdrawn**: FR-020/FR-021/FR-028/FR-032/FR-034
+  were amended, FR-035 and SC-012/SC-013 were added, and the constitution's
+  Principle V was amended to **v1.2.0** (the dashboard's system
+  interactions go exclusively through the platform's ubus API; the dashboard
+  implements no credential exchange of its own and creates no session token).
+  The mechanism is upstream-native: rpcd's all-zero session id **is** its
+  default session (`openwrt/rpcd` `include/rpcd/session.h:35`,
+  `RPC_DEFAULT_SESSION_ID`), and with a NULL login section rpcd grants
+  **only** the access group named `unauthenticated`
+  (`session.c:944-946`), so `saadway/files/rpc-acl.json` gains a group of
+  that exact name. `uhttpd-mod-ubus` checks every `/ubus` call through
+  rpcd's `session.access` with `params[0]` as the session id
+  (`openwrt/uhttpd` `ubus.c:280-297`, `820-840`), so the SPA's tokenless
+  envelope lands on the default session's grants.
+  **Withdrawn protection:** the dashboard-owned credential and its session
+  tokens. **Residual risk:** every host that can reach the LAN-bound
+  uhttpd listener can drive the whole `saadway` ubus object — the service
+  toggle, the profile/steering surface and the credential action
+  (`mgmt.credentials.set`) are all reachable; a LAN-side attacker can also
+  rotate the optional rpcd session credential.
+  **Compensating controls:** the uhttpd listener stays LAN-bound
+  (`saadway/files/uci-defaults/40-saadway-uhttpd` — the wildcard listener
+  is never restored) and the firewall's WAN input policy is the
+  network-layer guard, so the dashboard is not reachable from the WAN side;
+  the group covers the `saadway` object only, so no other ubus object is
+  exposed; the installation no longer ships a well-known default password
+  (the first-boot path stopped provisioning one), so the only credential
+  on the device is one the administrator chose.
+  **Operational guidance:** the dashboard is a LAN-admin surface — treat
+  every LAN host as inside its trust boundary, and use the router's own
+  firewall (a guest VLAN / a firewall zone that denies the dashboard's
+  port) to narrow it. Enforced by `tests/luci-spa-audit.sh` (T080) and, on
+  device, by the T046/T057 round (SC-012/SC-013).
+
 ## 8. libubus deferred-reply signature (build-time check)
 
 `mon.health_test` and `profile.activate` complete asynchronously (SC-003 /

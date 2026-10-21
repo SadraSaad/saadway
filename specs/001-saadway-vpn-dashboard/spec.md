@@ -158,11 +158,11 @@ the *Dashboard Credentials* tab (تنظیمات ورود به داشبورد) le
 dashboard's own login username and password without leaving the panel. The
 standalone web dashboard — completely independent of the LuCI look/feel and
 templates — hosts all proxy settings, routing rules, live monitoring, and
-maintenance tools, and is protected by its own username/password (or the
-router's root authentication) using secure session tokens so other LAN
-clients cannot access it. On a fresh installation the dashboard credential
-is initialized automatically, so the dashboard is reachable with the default
-credentials out of the box — no manual provisioning step.
+maintenance tools, and is reachable on the LAN **without any credential
+prompt** — its access control is the platform's network boundary (the
+LAN-bound uhttpd listener plus the firewall's WAN input policy), so the
+administrator opens it and works immediately: no login, no session token, no
+manual provisioning step.
 
 **Why this priority**: The dual-UI structure shapes the whole delivery:
 a thin, stable control surface for routine use, and a full modern UI for
@@ -171,11 +171,11 @@ advanced work. It is needed to reach every other story's workflows.
 **Independent Test**: Can be fully tested by visiting the LuCI page and
 verifying that exactly two tabs are offered — status/toggle/dashboard-link
 on the first, the credentials form on the second — then opening the
-standalone dashboard and attempting access without credentials (declined)
-and with valid credentials (accepted, session established); on a fresh
-installation the default credentials must be accepted without any manual
-step, and a credential change made in the LuCI tab must be accepted by the
-dashboard immediately.
+standalone dashboard: it MUST show the full interface immediately (no
+credential prompt, no session token) and every panel action MUST succeed; a
+fresh installation MUST be operable with 0 manual steps; the dashboard MUST
+be unreachable from the WAN side; and a credential change made in the LuCI
+tab MUST be accepted by rpcd's `session.login` immediately.
 
 **Acceptance Scenarios**:
 
@@ -187,24 +187,26 @@ dashboard immediately.
 2. **Given** the LuCI page, **When** the administrator toggles service
    enable/disable, **Then** the service state changes accordingly and
    the LuCI page reflects it.
-3. **Given** the standalone dashboard URL on the LAN, **When** an
-   unauthenticated client requests it, **Then** access is denied and
-   credentials are required before any data is shown.
-4. **Given** valid dashboard credentials, **When** the administrator
-   logs in, **Then** a secure session is created which cannot be reused
-   by another unauthenticated LAN client, and it expires on inactivity.
-5. **Given** a fresh installation where the dashboard credential has not
-   been customized yet, **When** the administrator opens the standalone
-   dashboard and logs in with the default credentials, **Then** the login
-   succeeds — no manual provisioning step is required beforehand.
+3. **Given** the standalone dashboard URL on the LAN, **When** a client
+   opens it, **Then** the dashboard renders immediately — no credential
+   prompt, no session token — and its ubus calls succeed through rpcd's
+   default (unauthenticated) session.
+4. **Given** the LAN-scoped dashboard, **When** the administrator opens
+   it, **Then** the access control is the network boundary: the dashboard
+   is served only on the LAN-bound listener, is unreachable from the WAN
+   side, and no session token is created or required.
+5. **Given** a fresh installation, **When** the administrator opens the
+   standalone dashboard, **Then** the dashboard is fully operable — no
+   credential and no manual provisioning step is required beforehand.
 6. **Given** the LuCI page, **When** the administrator opens the
    *Dashboard Credentials* tab, **Then** they see exactly three input
    fields — new username, new password, password confirmation — plus a
    *Save & Apply* action, and the stored password is not shown.
 7. **Given** the credentials tab filled with a new username and a matching
    new password and confirmation, **When** the administrator saves, **Then**
-   the standalone dashboard accepts the new credentials immediately and
-   rejects the previous ones.
+   rpcd accepts the new credential immediately and rejects the previous one
+   (the optional rpcd session credential — the dashboard itself performs no
+   login any more, FR-020).
 8. **Given** the credentials tab filled with a new password whose
    confirmation does not match, **When** the administrator saves, **Then**
    nothing is changed and an inline message explains the mismatch.
@@ -424,14 +426,21 @@ an active tunnel and verifying state recovery after reboot.
   lists into a single standard JSON backup file, and MUST import such a
   file onto the same or another system, restoring the complete
   configuration.
-- **FR-020**: The standalone web dashboard MUST be protected by its own
-  username/password or the router's root authentication, and MUST use
-  secure session tokens; unauthenticated access from any LAN client
-  MUST be denied.
+- **FR-020**: The standalone web dashboard MUST be reachable and fully
+  operable **without any credential prompt**: it MUST NOT implement a login
+  of its own, and its ubus calls MUST be authorized as rpcd's default
+  (unauthenticated) session rather than through a session token. Its access
+  control is therefore delegated to the platform's network boundary — the
+  LAN-bound uhttpd listener and the firewall's WAN input policy — and the
+  dashboard MUST NOT be reachable from the WAN side (amended 2026-10-21; the
+  previous dashboard-owned username/password requirement is withdrawn — see
+  FR-035 and the deviation record in `docs/verify-2512.md` §7).
 - **FR-021**: Stored authentication secrets (usernames, passwords,
   private keys, session tokens) MUST be kept with restricted system
   access and MUST NEVER be displayed in live logs, monitoring panels, or
-  any response provided without prior authentication.
+  any API response — the API surface is now reachable without prior
+  authentication (FR-020), so the "unauthenticated response" carve-out no
+  longer applies (amended 2026-10-21).
 - **FR-022**: A lightweight page inside the router's LuCI panel MUST
   offer exactly two tabs and nothing beyond them: **(1) Status & Control** —
   service status display, on/off enable/disable control, and a button
@@ -453,10 +462,12 @@ an active tunnel and verifying state recovery after reboot.
   partial save) and MUST detect duplicate bypass entries (rejecting or
   merging with clear feedback).
 - **FR-028**: On a fresh installation the standalone dashboard MUST be
-  reachable with the default credentials (username `admin`, password
-  `admin`) **without any manual provisioning step**; the initialization of
-  that default credential MUST be automatic and idempotent, and MUST NOT
-  overwrite a credential the administrator has already changed.
+  reachable and fully operable with **0** manual provisioning steps and
+  **without any credential** (FR-020). The installation MUST NOT ship a
+  well-known default password: the optional rpcd session credential of the
+  `saadway_login` mapping MAY be created on demand, and re-initialization
+  MUST NOT overwrite a credential the administrator has already changed
+  (amended 2026-10-21).
 - **FR-029**: The LuCI page MUST present the two tabs of FR-022, and the
   second tab MUST be titled "Dashboard Credentials" (تنظیمات ورود به
   داشبورد).
@@ -470,17 +481,27 @@ an active tunnel and verifying state recovery after reboot.
   matches the new password — and MUST reject invalid input with an inline,
   actionable message while leaving the stored credential unchanged.
 - **FR-032**: After a successful save, the new credential MUST be accepted
-  by the standalone dashboard login immediately (no restart, no
-  re-provisioning step), and the previous credential MUST stop being
-  accepted.
+  by rpcd's `session.login` for the `saadway_login` mapping immediately
+  (no restart, no re-provisioning step), and the previous credential MUST
+  stop being accepted (amended 2026-10-21 — the standalone dashboard itself
+  performs no login any more, see FR-020).
 - **FR-033**: The credential surface MUST NOT display or return any stored
   secret: reading the current configuration MUST reveal at most the
   username, and no stored password may appear in any response, log, page
   source or monitor panel (extends FR-021).
-- **FR-034**: The "Dashboard Credentials" tab and its action MUST be
-  reachable only from an authenticated administrative session of the
-  router's panel; an unauthenticated or non-administrative client MUST
-  neither read nor change the credential.
+- **FR-034**: The "Dashboard Credentials" tab MUST be reachable only from
+  an authenticated administrative session of the router's panel; an
+  unauthenticated or non-administrative client MUST neither read nor
+  change the credential **through the panel**. The underlying ubus action
+  is published to the LAN-scoped dashboard surface (FR-035), so it MUST
+  NOT expose any stored secret and MUST NOT weaken the panel's own
+  authentication (amended 2026-10-21).
+- **FR-035**: The dashboard's ubus access MUST be granted through a
+  dedicated rpcd access group named `unauthenticated`, and it MUST cover
+  the `saadway` ubus object only — no other ubus object may be reachable
+  by the dashboard's unauthenticated client. The dashboard's transport MUST
+  carry rpcd's default (unauthenticated) session id and MUST NOT perform a
+  `session.login` (amended 2026-10-21).
 - **FR-026**: System MUST handle the combined-active case of failover +
   kill switch during a total WAN outage by halting repeated profile
   cycling (no infinite loop), keeping clients contained, and resuming
@@ -545,13 +566,20 @@ an active tunnel and verifying state recovery after reboot.
   on first use, without documentation.
 - **SC-008**: In 100% of live-log views and unauthenticated API checks,
   no credential value is ever visible.
-- **SC-009**: On 100% of fresh installations, the first login attempt with
-  the default credentials succeeds with **0** manual provisioning steps.
-- **SC-010**: After saving new credentials from the LuCI page, a dashboard
-  login with the new values succeeds and a login with the previous values
-  fails — both within **5 seconds** of the save.
+- **SC-009**: On 100% of fresh installations, the standalone dashboard
+  opens and is fully operable with **0** manual provisioning steps and
+  **without any credential**.
+- **SC-010**: After saving new credentials from the LuCI page, rpcd's
+  `session.login` accepts the new values and rejects the previous ones —
+  both within **5 seconds** of the save.
 - **SC-011**: The stored password value appears **0** times in any page
   source, response body, log line or monitor panel.
+- **SC-012**: Opening `/saadway/` shows the dashboard with **no**
+  credential prompt; every panel action succeeds and **no** session token
+  appears in the DOM, the URL or the network log.
+- **SC-013**: The unauthenticated client is granted the `saadway` ubus
+  object and is refused for every other ubus object; the dashboard is
+  unreachable from the WAN side.
 
 ## Assumptions
 
@@ -574,8 +602,9 @@ an active tunnel and verifying state recovery after reboot.
   standard networking services (firewall, service manager, config
   store) are available; the feature does not need to support older
   platforms.
-- The default dashboard credential is `admin` / `admin`; it is initialized
-  automatically during installation/first start, and re-initialization
+- The standalone dashboard requires no credential: it is reachable and fully
+  operable on the LAN as soon as the package is installed (FR-020). The
+  optional rpcd session credential is created on demand, and re-initialization
   never resets a credential the administrator has changed.
 - Dashboard sessions established before a credential change stay valid until
   they expire on their own inactivity window.

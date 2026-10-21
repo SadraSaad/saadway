@@ -1,46 +1,34 @@
 {
 	"saadway": {
-		"description": "SaadWay dashboard RPC surface (Principle V: authenticated LAN sessions only; least privilege — strictly the saadway.* object methods, nothing system-wide). Attached to the 'admin' login via /etc/config/rpcd 'list read saadway'/'list write saadway' (uci-defaults/50-saadway-rpcd). Root sessions map LuCI's own trust path and are not further restricted here.",
+		"description": "SaadWay public dashboard RPC access. Principle V (constitution v1.2.0): the standalone dashboard is published to the LAN without a credential — its ubus calls are authorized as rpcd's default (unauthenticated) session. The compensating control is the platform's network boundary: the LAN-bound uhttpd listener (saadway/files/uci-defaults/40-saadway-uhttpd) and the firewall's WAN input policy. This group is attached to the 'saadway_login' login section (list read/write 'saadway'), i.e. it is the power set of an optional authenticated session.",
 		"read": {
 			"ubus": {
 				"saadway": [
-					"mgmt.status",
-					"profile.list",
-					"steer.list",
-					"sec.status",
-					"sec.dns.status",
-					"mon.stats",
-					"mon.logs"
+					"*"
 				]
 			}
 		},
 		"write": {
 			"ubus": {
 				"saadway": [
-					"mgmt.status",
-					"mgmt.set",
-					"profile.list",
-					"profile.import_openvpn",
-					"profile.create_ikev2",
-					"profile.update",
-					"profile.delete",
-					"profile.activate",
-					"profile.deactivate",
-					"steer.list",
-					"steer.domain.add",
-					"steer.domain.remove",
-					"steer.device.set",
-					"steer.device.remove",
-					"steer.iprange.set",
-					"sec.status",
-					"sec.kill_switch.set",
-					"sec.dns.status",
-					"mon.health_test",
-					"mon.stats",
-					"mon.logs",
-					"maint.backup.export",
-					"maint.backup.import",
-					"maint.cooldown.set"
+					"*"
+				]
+			}
+		}
+	},
+	"unauthenticated": {
+		"description": "SaadWay standalone-dashboard access group (spec FR-020/FR-035, constitution v1.2.0, research.md D11). rpcd grants ONLY the group literally named 'unauthenticated' to its default session (openwrt/rpcd session.c:944-946 — a NULL login section), and the default session is the one an all-zero session id resolves to (include/rpcd/session.h:35 RPC_DEFAULT_SESSION_ID). uhttpd-mod-ubus checks every /ubus call through rpcd's session.access with the request's params[0] as the session id (openwrt/uhttpd ubus.c:280-297, 820-840) — so this group is what makes the dashboard's calls succeed without a session.login. It covers the 'saadway' ubus object only: no other ubus object is reachable by the dashboard. Residual risk: any host that can reach the LAN-bound listener can drive the whole saadway object — recorded in docs/verify-2512.md §7.",
+		"read": {
+			"ubus": {
+				"saadway": [
+					"*"
+				]
+			}
+		},
+		"write": {
+			"ubus": {
+				"saadway": [
+					"*"
 				]
 			}
 		}

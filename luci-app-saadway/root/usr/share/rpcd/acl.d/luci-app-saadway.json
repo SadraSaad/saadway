@@ -1,20 +1,13 @@
 {
 	"luci-app-saadway": {
-		"description": "SaadWay lifecycle page for LuCI (Constitution Principle V strict dual-UI decoupling): grants the LuCI session exactly the two saadway.* lifecycle methods used by the view — service status display and enable/disable toggle, plus the open-dashboard link. No configuration surface. On stock OpenWrt the default rpcd login section for 'root' lists groups '*' (rpcd.config), so this permission group is attached automatically to LuCI root sessions; nothing to configure in /etc/config/rpcd.",
+		"description": "Grant LuCI access to SaadWay ubus and configuration",
 		"read": {
-			"ubus": {
-				"saadway": [
-					"mgmt.status"
-				]
-			}
+			"uci": [ "saadway" ],
+			"ubus": { "saadway": [ "*" ] }
 		},
 		"write": {
-			"ubus": {
-				"saadway": [
-					"mgmt.status",
-					"mgmt.set"
-				]
-			}
+			"uci": [ "saadway" ],
+			"ubus": { "saadway": [ "*" ] }
 		}
 	}
 }

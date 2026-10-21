@@ -1,7 +1,10 @@
-/* app.js — dashboard application logic (T029/T036).
+/* app.js — dashboard application logic (T029/T036, T079).
  * Views render against the contract payload shapes ONLY (contracts/api.md).
- * Every privileged interaction calls SwApi.saadway(...) with the session
- * token handled inside js/api.js. Rendering escapes all server strings.
+ * Every interaction calls SwApi.saadway(...); the transport is tokenless
+ * (spec FR-020/FR-035, constitution v1.2.0): the dashboard performs no
+ * credential exchange and creates no session token — the LAN-bound
+ * uhttpd listener and the firewall's WAN input policy are its access
+ * control (docs/verify-2512.md §7). Rendering escapes all server strings.
  */
 
 "use strict";
@@ -59,58 +62,18 @@
 		poll.status = setInterval(refresh_status, 5000);
 	}
 
-	var SwApp = {
-		on_session_lost: function () {
-			/* forced re-login on denial codes (api.js flag) */
-			show_login(true);
-		},
-	};
-	window.SwApp = SwApp;
-
 	/* ---------------------------------------------------------------- */
-	/* login view                                                       */
+	/* application shell                                                 */
 	/* ---------------------------------------------------------------- */
 
-	function show_login(expired) {
-		["#view-app"].forEach(function (s) { $(s).classList.add("hidden"); });
-		$("#view-login").classList.remove("hidden");
-		$("#btn-logout").classList.add("hidden");
-		$("#conn-badge").classList.add("hidden");
-		if (expired) {
-			var e = $("#login-err");
-			e.textContent = T("session_expired");
-			e.classList.remove("hidden");
-		}
-	}
-
+	/* T079: there is no login gate any more — the dashboard opens
+	 * straight into the application shell and every call is authorized as
+	 * rpcd's default (unauthenticated) session. */
 	function show_app() {
-		$("#view-login").classList.add("hidden");
 		$("#view-app").classList.remove("hidden");
-		$("#btn-logout").classList.remove("hidden");
 		$("#conn-badge").classList.remove("hidden");
 		start_status_poll();
 		switch_tab("profiles");
-	}
-
-	function on_login(ev) {
-		ev.preventDefault();
-		$("#login-err").classList.add("hidden");
-		var u = $("#login-user").value, p = $("#login-pass").value;
-		SwApi.login(u, p).then(function (r) {
-			if (r.ok) {
-				$("#login-pass").value = "";     /* pwd never persisted */
-				show_app();
-			} else {
-				var e = $("#login-err");
-				e.textContent = T("login_failed");
-				e.classList.remove("hidden");
-			}
-		});
-	}
-
-	function on_logout() {
-		stop_all_polls();
-		SwApi.logout().then(function () { show_login(false); });
 	}
 
 	/* ---------------------------------------------------------------- */
@@ -423,7 +386,6 @@
 		}
 	}
 
-	function stop_all_polls() { stop_poll("status", "stats", "logs"); }
 
 	function poll_stats() {
 		SwApi.saadway("mon.stats").then(function (r) {
@@ -656,16 +618,10 @@
 			$("#lang-switch").addEventListener("change", function (ev) {
 				window.I18n.set(ev.target.value, function () { });
 			});
-			$("#login-form").addEventListener("submit", on_login);
-			$("#btn-logout").addEventListener("click", on_logout);
 			document.body.addEventListener("click", panel_events);
-			/* session restore: probe with a status call; 401 → login view */
-			if (SwApi.is_logged_in()) show_app();
-			else {
-				SwApi.saadway("mgmt.status").then(function (r) {
-					if (r.ok) show_app(); else show_login(false);
-				});
-			}
+			/* T079: no authentication gate — the shell opens directly and
+			 * the first status poll reports any transport problem. */
+			show_app();
 		});
 	}
 

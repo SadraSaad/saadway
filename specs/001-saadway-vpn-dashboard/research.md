@@ -339,6 +339,40 @@ crypt(3) in the browser, non-atomic — rejected); rpcd's `file.exec`
 split, non-atomic flow — the password would change before the login
 mapping).
 
+## D11. Standalone dashboard without a login (Principle V, amendment v1.2.0)
+
+**Decision**: the standalone dashboard at `/saadway/` performs **no**
+credential exchange. Its SPA calls `POST /ubus` with rpcd's default
+(unauthenticated) session id (`"00000000000000000000000000000000"`) and is
+authorized through a dedicated rpcd access group named `unauthenticated`
+in `saadway/files/rpc-acl.json`, which covers the `saadway` ubus object
+only. The dashboard's access control is the platform's network boundary:
+the LAN-bound uhttpd listener written by
+`saadway/files/uci-defaults/40-saadway-uhttpd` plus the firewall's WAN
+input policy.
+
+**Why** (upstream facts, 2026-10-21 — upstream is the oracle):
+- `openwrt/rpcd` `include/rpcd/session.h:35` — the all-zero id **is**
+  rpcd's default session (`RPC_DEFAULT_SESSION_ID`), so it needs no login.
+- `openwrt/rpcd` `session.c:1396-1400` — the default session is created
+  once at startup with `rpc_login_setup_acls(ses, NULL)`; a NULL login
+  section means `session.c:944-946` grants **only** the group named
+  `unauthenticated` ⇒ the group's *name* is the authorization mechanism.
+- `openwrt/rpcd` `session.c:606-660`/`:1414` — the check is (scope, object,
+  function) with fnmatch matching, so `"saadway": ["*"]` covers the whole
+  object.
+- `openwrt/uhttpd` `ubus.c:820-840`/`:280-297` — every `/ubus` call is
+  checked through rpcd's `session.access` with `params[0]` as the session
+  id, so a tokenless call lands on the default session's grants.
+
+**Alternatives considered**: uhttpd's `ubus_noauth` (skips the ACL check
+for **every** ubus object — far too broad; rejected); keeping the SPA's
+login (withdrawn by the maintainer directive of 2026-10-21; rejected);
+granting the `unauthenticated` group an object other than `saadway` (the
+dashboard's blast radius must stay inside its own object; rejected);
+shipping a well-known default password with no consumer (a liability —
+rejected: the first-boot path no longer provisions one).
+
 ## Open questions for build-time verification (tracked, all low-risk)
 
 - Confirm `uhttpd-mod-ubus` package availability and ACL syntax in the

@@ -1,26 +1,45 @@
-/* luci-app-saadway dashboard.js — the LuCI controller page (T031, FR-022, T077)
+/* luci-app-saadway dashboard.js — the LuCI controller page (T031, FR-022, T077, T079)
  *
- * Constitution Principle V (v1.1.0) — the LuCI surface carries EXACTLY two
+ * Constitution Principle V (v1.2.0) — the LuCI surface carries EXACTLY two
  * tabs:
  *   1. "Status & Control" — the service status display, the enable/disable
  *      toggle (saadway.mgmt.set) and the "Open Dashboard" link to the
  *      standalone SPA (/saadway/);
- *   2. "Dashboard Credentials" (تنظیمات ورود به داشبورد) — the login
- *      credential form of the STANDALONE dashboard: new username, new
- *      password, password confirmation and the standard Save & Apply action.
- *      This tab is the single bounded exception to the dual-UI decoupling
- *      (constitution v1.1.0): it manages the dashboard's OWN login, not the
- *      service's configuration — no profile, steering or monitoring surface
+ *   2. "Dashboard Credentials" (تنظیمات ورود به داشبورد) — the form that
+ *      manages the OPTIONAL rpcd session credential of the `saadway_login`
+ *      mapping. Since the auth bypass of 2026-10-21 (spec FR-020/FR-035,
+ *      constitution v1.2.0, research.md D11) the standalone dashboard
+ *      itself logs in no more — it is authorized as rpcd's default
+ *      (unauthenticated) session and its access control is the platform's
+ *      network boundary (the LAN-bound uhttpd listener + the firewall's WAN
+ *      input policy). The credential this tab manages is therefore the
+ *      optional operator credential, not the dashboard's entry point.
+ *      The tab stays bounded: no profile, steering or monitoring surface
  *      appears here.
  *
  * The credential change is ONE ubus call (saadway.mgmt.credentials.set): the
  * browser never writes UCI, never hashes the password and never sees the
- * stored secret (FR-021/FR-033). The method is granted to a root-only ACL
- * group (saadway-credentials), so the dashboard's own session can never
- * re-key its login (FR-034).
+ * stored secret (FR-021/FR-033).
+ *
+ * T079 (Phase 24) — the three rendering defects:
+ *   - `'require view';` is mandatory: `view` is a BUILT-IN LuCI module
+ *     (openwrt/luci modules/luci-base/.../luci.js:2243 → `view: View`),
+ *     not a global — without the require, `view.extend` is undefined and the
+ *     page dies with "TypeError: view.extend is not a function".
+ *   - the form is bound to the SERVICE's own UCI coordinates: a form.Map is
+ *     bound to exactly ONE uci config (form.js → CBIMap), so the map must
+ *     carry the config the state actually lives in ('saadway') and the
+ *     section that holds it ('service' — `config service 'service'` in
+ *     saadway/files/saadway.conf). Binding 'luci'/'system' renders a
+ *     section with no values ("This section contains no values yet").
+ *   - the map's own load check is `callSessionAccess('uci', <config>,
+ *     'write')` (CBIMap.load) — the app's ACL group must carry the uci
+ *     scope for the 'saadway' config, which is granted in
+ *     luci-app-saadway/root/usr/share/rpcd/acl.d/luci-app-saadway.json.
  */
 'use strict';
 
+'require view';
 'require rpc';
 'require form';
 'require poll';
@@ -90,7 +109,7 @@ return view.extend({
 	load: function () {
 		return Promise.all([
 			callSaadwayStatus(),
-			uci.load('rpcd')
+			uci.load('saadway')
 		]);
 	},
 
@@ -98,15 +117,18 @@ return view.extend({
 		var st = data[0] || {};
 		var self = this;
 
-		/* The map's configuration is the panel's own ('luci'): the form
-		 * never writes UCI — every option below overrides write() — so
-		 * neither Save & Apply nor Revert can touch the service's state
-		 * (the daemon owns /etc/config/saadway). */
-		var m = new form.Map('luci',
+		/* The map is bound to the SERVICE's own config: 'saadway' carries
+		 * the state this page shows (config 'service'), and the app's ACL
+		 * group grants the uci scope for it. No option ever writes UCI
+		 * (every write() below is overridden), so neither Save & Apply nor
+		 * Revert can touch the daemon's state — the daemon owns
+		 * /etc/config/saadway and commits every write itself, so the
+		 * revert only discards an empty delta. */
+		var m = new form.Map('saadway',
 			_('SaadWay VPN Tunnel & Routing'),
-			_('Service lifecycle and the standalone dashboard login.'));
+			_('Service lifecycle and the standalone dashboard.'));
 
-		var s = m.section(form.TypedSection, 'system', _('Service'));
+		var s = m.section(form.TypedSection, 'service', _('Service'));
 		s.anonymous = true;
 		s.addremove = false;
 
@@ -125,16 +147,16 @@ return view.extend({
 			return statusBox;
 		};
 
-		/* ---------------- Tab 2: the dashboard credential form ----- */
+		/* ---------------- Tab 2: the credential form ---------------- */
+		/* The username is intentionally NOT pre-filled: reading the
+		 * /etc/config/rpcd mapping would need a uci scope the panel does
+		 * not hold, and a failed read would break the page (FR-033 — at
+		 * most the username may ever be revealed). */
 		var user = s.taboption(TAB_CREDS, form.Value, 'saadway_username',
 			_('New Username'));
 		user.optional = true;
 		user.write = function () {};        /* never UCI */
-		user.cfgvalue = function () {
-			/* the CURRENT login name only — the stored secret is never
-			 * read back and never displayed (FR-033) */
-			return uci.get('rpcd', 'saadway_login', 'username') || '';
-		};
+		user.cfgvalue = function () { return ''; };
 
 		var pass = s.taboption(TAB_CREDS, form.Value, 'saadway_password',
 			_('New Password'));
@@ -158,10 +180,8 @@ return view.extend({
 		};
 
 		/* The writer is the username field: forcewrite makes it apply on
-		 * every Save & Apply, so a password-only change works as well
-		 * (the user name keeps its pre-filled value). The whole change
-		 * is ONE ubus call — the browser neither writes UCI nor hashes
-		 * the password (FR-021). */
+		 * every Save & Apply. The whole change is ONE ubus call — the
+		 * browser neither writes UCI nor hashes the password (FR-021). */
 		user.forcewrite = true;
 		user.write = function (section_id) {
 			var newUser = user.formvalue(section_id);
