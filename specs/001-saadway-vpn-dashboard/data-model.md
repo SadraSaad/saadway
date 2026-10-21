@@ -75,23 +75,34 @@ device-direct > domain-bypass > IP-range auto-bypass > implicit tunnel default.
 | `match_value` | IPv4 CIDR or MAC | valid syntax enforced |
 | `policy` | enum | `direct` \| `tunneled` (explicit override of tunnel default) |
 
-**UCI section type** `saadway_service` (conceptual kind: IP-range auto-bypass)
+**UCI section type** `service` (option `iprange_bypass` — the shipped type
+per `contracts/uci.md` and `saadway/files/saadway.conf`; the pre-T098 name
+`saadway_service` does not exist)
 
 | Field | Type | Constraints |
 |---|---|---|
 | `iprange_bypass` | boolean | default `false`; enables bundled local/country/banking CIDR set |
 
-**Uniqueness** (FR-025, Edge Case 3): duplicate domain (case-insensitive) or
-duplicate match_value is detected at create; response = reject with
-non-destructive feedback (choosing "reject" — merge semantics of overlapping
-entries stay simple and rule removal never silently drops an overlapping
-distinct entry).
+**Uniqueness** (FR-025, Edge Case 3) — the two rule kinds behave
+differently, and the model states both exactly:
+
+- **Domain rules — reject.** A duplicate domain (compared
+  case-insensitively) is detected on create and the request is rejected with
+  `E_DUPLICATE` — no silent double rule, and rule removal never silently
+  drops an overlapping distinct entry.
+- **Device rules — set semantics.** `steer.device.set` **updates** the
+  existing rule with the same `match_type` + `match_value` (its `policy` is
+  replaced in place); it is never rejected as a duplicate. The dashboard's
+  device form relies on this: re-submitting a device updates its policy.
 
 ## Entity: ServiceState
 
 Global operational state; UCI-persisted and runtime-cached.
 
-**UCI section type** `saadway_service`
+**UCI section type** `service` (the shipped type per `contracts/uci.md` and
+`saadway/files/saadway.conf`; the pre-T098 name `saadway_service` does not
+exist). The dashboard preferences live in the separate `dashboard` section
+(`language`, `authentication`, `session_timeout`).
 
 | Field | Type | Constraints |
 |---|---|---|
@@ -100,6 +111,7 @@ Global operational state; UCI-persisted and runtime-cached.
 | `connection_status` | enum | `up` \| `down` \| `connecting` \| `contained` (kill-switch hold) \| `cooldown` |
 | `failover_attempts` | integer | current failed-attempt counter |
 | `cycle_exhausted` | boolean | one full profile cycle failed |
+| `run_attempts` | integer | attempts in the current cycle (written by the daemon) |
 
 **Watchdog/kill-switch config** (same `saadway_service` section, defaults
 per research D2/D5/D6):

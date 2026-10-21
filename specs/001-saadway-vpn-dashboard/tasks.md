@@ -1393,7 +1393,7 @@ one import-validation rule that is not enforced, and two data-model
 statements that do not match the shipped UCI. The on-device items remain
 tracked as **T046** and **T057** (device-bound) and are NOT re-appended.
 
-- [ ] T097: Reject a `dev` directive in an imported `.ovpn` file per FR-001, FR-025, Constitution IV (contradicts) — target file: `saadway/src/tunnel-openvpn.c`:
+- [X] T097: Reject a `dev` directive in an imported `.ovpn` file per FR-001, FR-025, Constitution IV (contradicts) — target file: `saadway/src/tunnel-openvpn.c`:
   - The data model's validation rules require the importer to refuse
     dangerous directives, explicitly listing *"`dev` overrides conflicting
     with saadwaydev naming"*. The shipped ban list
@@ -1416,7 +1416,7 @@ tracked as **T046** and **T057** (device-bound) and are NOT re-appended.
     line is rejected with `E_UNSUPPORTED_DIRECTIVE` while one without it
     imports unchanged (on-device proof folded into T046/T057).
 
-- [ ] T098: Correct the data model's UCI section types per FR-024, plan: the UCI contract (contradicts) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
+- [X] T098: Correct the data model's UCI section types per FR-024, plan: the UCI contract (contradicts) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
   - The data model declares the UCI section type **`saadway_service`** in
     two places — the IP-range auto-bypass ("conceptual kind") and the
     `ServiceState` entity — but **no such section type exists**. The
@@ -1440,7 +1440,7 @@ tracked as **T046** and **T057** (device-bound) and are NOT re-appended.
     `saadway/files/saadway.conf` and is handled by the daemon
     (`uci-state.c`), and the data model agrees with `contracts/uci.md`.
 
-- [ ] T099: State the two different uniqueness behaviours in the data model per FR-025 (partial) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
+- [X] T099: State the two different uniqueness behaviours in the data model per FR-025 (partial) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
   - The `SteeringRule` entity's uniqueness rule says a duplicate
     **`match_value`** is "detected at create; response = reject", but the
     daemon's `sw_uci_device_set` has **set semantics**: an existing rule
@@ -1458,6 +1458,15 @@ tracked as **T046** and **T057** (device-bound) and are NOT re-appended.
   - Verification: the data model's wording matches the daemon's behaviour
     for both rule kinds (a read of `sw_uci_domain_add` and
     `sw_uci_device_set`).
+
+**As implemented (T097–T099)** — one decision worth recording:
+**T097 refused the directive at import** instead of keeping the neutralising
+trailing identity lines as the only defence: the import now fails closed
+with `E_UNSUPPORTED_DIRECTIVE` (the same code the other dangerous
+directives produce), the operator is told, and the safety no longer depends
+on openvpn's last-one-wins option order. The renderer's own
+`dev-type tun` + `dev <saadwaydev>` lines stay (they are the interface
+identity, Principle III).
 
 **Checkpoint**: the importer refuses a device override instead of relying on
 the option order, the data model names the UCI sections that actually

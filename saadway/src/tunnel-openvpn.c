@@ -25,6 +25,10 @@ static const char *banned_dirs[] = {
 	"script-security", "tls-verify", "pkcs11-id", "pkcs11-module",
 	"plugin", "http-proxy", "http-proxy-retry", "http-proxy-option",
 	"socks-proxy", "dev-node", "redirect-gateway", "route",
+	"dev",           /* T097: the interface identity is the renderer's
+			 * (dev-type tun + dev <saadwaydev>); an imported
+			 * "dev" line is refused instead of being neutralised
+			 * by the option order (fail closed, Constitution IV) */
 	"client-cert-not-required", "verify-client-cert", "port",
 };
 

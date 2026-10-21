@@ -1240,6 +1240,39 @@ this phase; each traces to the appended tasks.md lines.
   JavaScript parses, all shipped JSON valid, the i18n locales **128 = 128**,
   and the data model's stale-claim grep is clean.
 
+### Phase 28 record — the `.ovpn` device override and the data model's UCI types (T097–T099)
+
+* **T097 — the import now refuses a device override.** The data model
+  requires the importer to reject "`dev` overrides conflicting with
+  saadwaydev naming", but the ban list carried `dev-node` and not `dev`:
+  a `dev tun5` line was copied verbatim into the rendered 0600 config and
+  was only neutralised because the renderer appends its own
+  `dev-type tun` + `dev <saadwaydev>` identity **last** — i.e. the safety
+  rested on openvpn's option order rather than on the import refusing the
+  directive, and the operator got no feedback. `dev` is now banned: the
+  import fails closed with `E_UNSUPPORTED_DIRECTIVE` (no partial save),
+  and the renderer's own identity lines remain as the interface identity
+  (Principle III).
+* **T098 — the data model names the sections that exist.** It declared the
+  UCI section type `saadway_service` in two places (the IP-range auto-bypass
+  and the `ServiceState` entity) — a type that does not exist: the shipped
+  and contracted type is `service` (`contracts/uci.md`, `saadway.conf`,
+  `uci-state.c:896`), with the dashboard preferences in `dashboard`. Both
+  declarations are corrected, and the `ServiceState` field table now lists
+  the options the daemon actually reads and writes in the `service`
+  section (`run_attempts` included).
+* **T099 — the uniqueness rule states both behaviours.** The model claimed a
+  duplicate device `match_value` is rejected; the daemon's
+  `sw_uci_device_set` has **set semantics** (the existing rule's policy is
+  replaced in place). The rule now states: a duplicate **domain**
+  (case-insensitive, `strcasecmp`) is rejected with `E_DUPLICATE`, while a
+  repeated device `match_value` updates the existing rule — the behaviour
+  the dashboard's device form relies on.
+* **Host evidence**: all seven host audits green, the unit suite 21/21, the
+  14-module `-Wall -Wextra` sweep clean, shellcheck clean, all shipped
+  JavaScript parses, all shipped JSON valid, the i18n locales **128 = 128**,
+  and the data model's section types now match `saadway.conf`.
+
 ---
 
 **Traceability:** Gates 1–7 are executed by `quickstart.md` scenarios 1–7
