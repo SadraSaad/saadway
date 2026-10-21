@@ -11,8 +11,10 @@
 #      in a world-readable UCI file
 #   B  the password is PIPED to the setter - never an argument (argv is
 #      readable through /proc/<pid>/cmdline)
-#   C  the default credential is initialized only when the account is absent
-#      (an upgrade must never overwrite an administrator's change)
+#   C  the first-boot path provisions NO well-known default password (T079:
+#      the standalone dashboard needs no credential, so a default password
+#      would be a liability with no consumer), the credential mapping is
+#      refreshed only when the account exists, and rpcd is still reloaded
 #   D  the credential-change path creates the account BEFORE it updates the
 #      mapping (a mapping must never reference a missing account)
 #   E  the credential method is granted to a dedicated root-only ACL group
@@ -124,6 +126,7 @@ fi
 # ---------------------------------------------------------------------
 echo "check B — the password is piped to the setter"
 prov=$(strip_comments "$PROVISION")
+rpcd=$(strip_comments "$RPCD")
 
 leak=$(printf '%s\n' "$prov" | grep -E '(chpasswd|passwd|cryptpw)' |
 	grep -E "(DEFAULT_PASSWORD|'admin'|\"admin\")")
@@ -144,27 +147,49 @@ fi
 # ---------------------------------------------------------------------
 # C — the default is initialized only when the account is absent
 # ---------------------------------------------------------------------
-echo "check C — the default credential is initialized only when absent"
-if printf '%s\n' "$prov" | grep -q '^	init)'; then
-	report_pass "the helper has an 'init' mode (the first-boot path)"
-else
-	report_fail "the helper has no 'init' mode — the default credential is never initialized automatically"
-fi
-
-# the init branch must test the account's existence before applying it
-init_block=$(printf '%s\n' "$prov" | sed -n '/^	init)/,/^	[a-z-]*)/p')
-if printf '%s\n' "$init_block" | grep -q 'user_exists' &&
-	printf '%s\n' "$init_block" | grep -q 'set_password'; then
-	report_pass "the init mode applies the default only behind an existence check"
-else
-	report_fail "the init mode does not guard the default behind an existence check"
-fi
-
-# the first-boot script must actually call it
+echo "check C — the first-boot path provisions no well-known default password"
+# T079: the dashboard needs no credential (spec FR-020) — the first-boot
+# path MUST NOT ship a default password any more.
 if grep -q 'provision init' "$RPCD"; then
-	report_pass "the first-boot script initializes the default credential"
+	report_fail "the first-boot script provisions the default credential — a well-known password with no consumer"
 else
-	report_fail "the first-boot script does not initialize the default credential"
+	report_pass "the first-boot script provisions no default credential"
+fi
+
+# the helper may keep the opt-in 'init' mode, but it must stay guarded by an
+# existence check (it must never overwrite an administrator's change)
+if printf '%s\n' "$prov" | grep -q '^	init)'; then
+	init_block=$(printf '%s\n' "$prov" | sed -n '/^	init)/,/^	[a-z-]*)/p')
+	if printf '%s\n' "$init_block" | grep -q 'user_exists' &&
+		printf '%s\n' "$init_block" | grep -q 'set_password'; then
+		report_pass "the helper's opt-in 'init' mode applies the default only behind an existence check"
+	else
+		report_fail "the helper's 'init' mode does not guard the default behind an existence check"
+	fi
+else
+	report_pass "the helper has no 'init' mode at all"
+fi
+
+# the credential mapping is refreshed only when the account exists — an
+# operator-set credential must survive an upgrade
+if printf '%s\n' "$rpcd" | grep -q '/etc/passwd'; then
+	report_pass "the credential mapping is refreshed only when the account exists"
+else
+	report_fail "the mapping refresh is unconditional — an operator-set credential would be clobbered"
+fi
+
+# the commit and the rpcd reload must stay: rpcd binds the default session's
+# ACLs once at startup (openwrt/rpcd session.c:1396-1400)
+if printf '%s\n' "$rpcd" | grep -q 'commit rpcd'; then
+	report_pass "the rpcd package is committed"
+else
+	report_fail "no 'commit rpcd' — the mapping would be lost on the next reboot"
+fi
+
+if printf '%s\n' "$rpcd" | grep -q 'init.d/rpcd'; then
+	report_pass "rpcd is reloaded (the default session's ACLs are granted at startup)"
+else
+	report_fail "rpcd is not reloaded — the dashboard would stay permission-denied until the next reboot"
 fi
 
 # ---------------------------------------------------------------------

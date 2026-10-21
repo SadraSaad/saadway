@@ -11,9 +11,9 @@
 #      with getspnam(<name>)), the package is committed (a batch alone writes
 #      only a /tmp delta), and the ACL grant stays least-privilege
 #   B  no plaintext credential material in any shipped UCI-writing file
-#   C  the SPA publishes no password: the username is pre-filled, the
-#      password input carries no value (the SPA is served to every LAN
-#      client — a pre-filled password would publish the credential)
+#   C  the SPA publishes no credential material: since T079 the dashboard
+#      has no login form at all (spec FR-020 — the access control is the
+#      network boundary), and no page source may carry a password
 #   D  the provisioning applies the password over STDIN, never as an
 #      argument (argv is readable through /proc/<pid>/cmdline), probes for a
 #      password setter and fails closed when none exists
@@ -146,26 +146,22 @@ fi
 # ---------------------------------------------------------------------
 # C — the SPA publishes no password
 # ---------------------------------------------------------------------
-echo "check C — the SPA page source carries no password ($INDEX)"
+echo "check C — the SPA page source carries no credential material ($INDEX)"
 index_html=$(strip_html_comments "$INDEX")
 
-user_line=$(printf '%s\n' "$index_html" | grep 'id="login-user"')
-pass_line=$(printf '%s\n' "$index_html" | grep 'id="login-pass"')
-
-if printf '%s\n' "$user_line" | grep -q "value=\"${DEFAULT_USER}\""; then
-	report_pass "the username input is pre-filled with '${DEFAULT_USER}'"
+# T079: the login gate is gone — the dashboard needs no credential
+# (spec FR-020). The rule is now the negative one: no login form may be
+# published, and no page source may carry a password.
+if printf '%s\n' "$index_html" | grep -q 'id="login-form"\|id="login-user"\|id="login-pass"'; then
+	report_fail "the SPA still publishes a login form — the dashboard needs no credential (spec FR-020)"
 else
-	report_fail "the username input is not pre-filled with '${DEFAULT_USER}'"
+	report_pass "the SPA publishes no login form"
 fi
 
-if [ -z "$pass_line" ]; then
-	report_fail "the password input (id=\"login-pass\") is missing"
-elif printf '%s\n' "$pass_line" | grep -q 'value='; then
-	report_fail "the password input carries a value — the credential would be published in the page source"
-elif printf '%s\n' "$pass_line" | grep -q "$DEFAULT_PASSWORD"; then
-	report_fail "the password input carries the default password"
+if printf '%s\n' "$index_html" | grep -q "$DEFAULT_PASSWORD"; then
+	report_fail "the SPA page source carries the default password"
 else
-	report_pass "the password input carries no value"
+	report_pass "the SPA page source carries no password"
 fi
 
 # ---------------------------------------------------------------------
