@@ -1472,3 +1472,97 @@ identity, Principle III).
 the option order, the data model names the UCI sections that actually
 exist and the uniqueness behaviour the daemon implements, and the shipped
 code, the contracts and the model agree with each other.
+
+## Phase 29: Convergence — the credential edge case and the plan's compliance table (2026-10-21)
+
+**Purpose**: the fifth convergence pass (after Phases 25–28) probed the last
+two unexamined surfaces: the specification's **edge-case list** and the
+plan's **Constitution Check** table. The code is sound — the boot sequence
+matches D8, the `core.nft` skeleton matches the renderer (mark classes
+0x01/0x02/0x04/0x08, rule priorities 7000/7100/7200/7300/7900), and the
+updown script's contract holds. The findings are three **document**
+statements that still describe the pre-auth-bypass model. The on-device
+items remain tracked as **T046** and **T057** (device-bound) and are NOT
+re-appended.
+
+- [ ] T100: Reconcile the credential edge case with the amended access model per FR-020, FR-034 (contradicts) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
+  - The edge-case list still contains: *"A client without an administrative
+    session reaching the credentials form: the form and its action MUST be
+    unreachable, and the stored credential MUST NOT be readable."* The
+    **panel form** still satisfies that half — LuCI itself requires the
+    router's administrative login — but the **action** no longer does: the
+    `unauthenticated` ACL group grants the whole `saadway` ubus object
+    (the wildcard), so `saadway.mgmt.credentials.set` is reachable by a
+    session-less LAN client. That is the state recorded in
+    `docs/verify-2512.md` §7 (the withdrawn protection + the residual
+    risk) and in the amended FR-034, but this edge case still states the
+    opposite.
+  - Rewrite the edge case to the shipped model: the **panel form** is
+    unreachable without an administrative panel session (the LuCI login
+    gate) and the stored credential is never readable (no response ever
+    carries a secret, FR-021/FR-033) — while the underlying ubus action
+    is **LAN-scoped** like the rest of the `saadway` surface, which is the
+    recorded deviation (§7) and the reason the network boundary is the
+    access control. The edge case MUST NOT claim an isolation the shipped
+    model does not have.
+  - The FR/SC text, the user stories and their acceptance scenarios MUST NOT
+    change in this task — only the edge case is reconciled.
+  - Verification: the edge-case list contains no statement that a
+    session-less client is refused the credential **action** (a grep over
+    the document must show only the amended wording and the marked
+    history), and the two neighbouring edge cases keep their SUPERSEDED
+    markers.
+
+- [ ] T101: Update the plan's Constitution Check table to the v1.2.0 model per plan: the Constitution Check, Constitution V / IV (contradicts) — target file: `specs/001-saadway-vpn-dashboard/plan.md`:
+  - Two rows of the compliance table still assert the pre-auth-bypass
+    model:
+    - **Principle V**: *"research.md D7 (uhttpd-mod-ubus authenticated
+      JSON-RPC only; the standalone dashboard keeps every system
+      interaction behind an authenticated API) + D10 (the LuCI surface gains
+      ONE bounded exception …)"* — the dashboard's transport is no longer
+      an authenticated API (spec FR-020/FR-035, constitution v1.2.0,
+      research.md D11): it is a tokenless JSON-RPC client authorized as
+      rpcd's default (unauthenticated) session.
+    - **IV-a (credential material confinement)**: *"… the new ubus method is
+      granted to a dedicated root-only ACL group, so the dashboard's own
+      session can never re-key its login"* — the method is still granted to
+      the narrow `saadway-credentials` group, but that group is no longer
+      an exclusive boundary: the LAN-scoped `unauthenticated` group covers
+      the whole `saadway` object (T088 re-documented it; the §7 deviation
+      records the withdrawal).
+  - Update both rows to the shipped model: the delegated-boundary access
+    control (the LAN-bound listener + the WAN input policy), the
+    `unauthenticated` group as the dashboard's authorization path, the
+    narrow credential group as the grant to use if the wildcard is ever
+    tightened, and a pointer to the §7 residual risk. The principle's
+    status column MUST stay a PASS with the correct evidence (the
+    constitution itself is v1.2.0 — `research.md` D11 is the reference,
+    not D7 alone).
+  - The other nine rows and the "Post-Phase-1 re-check" note MUST stay
+    unchanged.
+  - Verification: no row of the table claims an authenticated dashboard
+    API or a root-only credential grant, and each row's evidence still
+    points at an artifact that exists.
+
+- [ ] T102: Mark the concurrent-dashboard edge case as superseded per FR-020 (partial) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
+  - The edge case *"Dashboard access from concurrently connected devices:
+    multiple simultaneous administrator sessions must be supported without
+    one session invalidating another's configuration changes mid-edit"*
+    still speaks of administrator **sessions** — the dashboard has none
+    since the auth bypass (its calls are authorized as rpcd's default
+    session). The two other session-flavoured edge cases were marked
+    SUPERSEDED in T093; this one was missed.
+  - Mark it superseded and restate the surviving requirement: several
+    clients may drive the dashboard **concurrently** and the
+    configuration changes of one must not be invalidated by another's
+    mid-edit — which the UCI-backed state model (constitution VI) and the
+    per-rule set semantics (`steer.device.set` updates its own rule) do
+    satisfy.
+  - Verification: the edge-case list contains no unmarked reference to a
+    dashboard session.
+
+**Checkpoint**: the specification's edge cases, the plan's compliance table
+and the shipped code describe the same access model — a LAN-scoped,
+tokenless dashboard whose access control is the platform's network
+boundary, with the credential action's reach recorded as a deviation rather
+than claimed as an isolation.
