@@ -103,25 +103,32 @@ listed in docs/verify-2512.md §7). Alternative mode: set
    (تنظیمات ورود به داشبورد — new username / new password / confirmation /
    Save & Apply). No other settings controls; the stored password is never
    displayed (FR-033).
-2. Request dashboard resource without session: every `saadway.*` RPC via
-   `/ubus` is denied (401-level; Gate 6).
-3. Login creates ubus session; second unauthenticated device cannot use
-   that token (ACL + session binding); session expires after
-   `dashboard.session_timeout` of inactivity.
+2. Open `http://<lan-ip>/saadway/` **without any credential**: the
+   dashboard renders immediately — no login prompt, no session token in the
+   DOM, in the URL or in the browser's network log (SC-012) — and every
+   panel action succeeds. The requests carry rpcd's all-zero default
+   session id (`params[0] = "00000000000000000000000000000000"`).
+3. Verify the authorization boundary (Gate 6 / FR-035): the tokenless
+   client reaches the `saadway` ubus object and **nothing else** — a call
+   to any other ubus object (e.g. `uci get`, `file exec`, `system`) is
+   denied (ubus PERMISSION_DENIED), and the dashboard is **unreachable
+   from the WAN side** (the uhttpd listener is LAN-bound and the firewall's
+   WAN input policy rejects the port) — SC-013.
 4. Verify SPA is Persian RTL by default with fa/en switch; preference
    persists (FR-027).
-5. Verify the default credential is initialized: on a fresh installation
-   the dashboard accepts the default credentials with **0** manual steps
-   (FR-028/SC-009); after changing them in the LuCI credentials tab, the
-   new values are accepted and the old ones rejected within 5 s
-   (FR-032/SC-010); a mismatching confirmation is rejected without any
-   change (FR-031).
-6. Verify the authorization split: a session established with the
-   DASHBOARD credential must be refused by `saadway.mgmt.credentials.set`
-   (ubus PERMISSION_DENIED — the method lives in the root-only
-   `saadway-credentials` ACL group, which the dashboard's own `saadway`
-   group does not hold), while the router's root session may call it
-   (FR-034).
+5. Verify the OPTIONAL operator credential: on a fresh installation the
+   dashboard needs **no** credential and is fully operable with **0**
+   manual steps (FR-028/SC-009), and **no** default password is shipped
+   (`grep '^admin:' /etc/shadow` → no row). After setting a credential in
+   the LuCI credentials tab, `ubus call session login '{"username":"…",
+   "password":"…"}'` accepts the new values and rejects the previous ones
+   within 5 s (FR-032/SC-010); a mismatching confirmation is rejected
+   without any change (FR-031). The stored secret appears **0** times in
+   any page source, response body, log line or monitor panel (SC-011).
+6. Verify the panel-only surface: the "Dashboard Credentials" tab is
+   reachable ONLY from the router's authenticated administrative panel
+   session (FR-034); the credential itself is never published by the SPA
+   (the page source carries no login form and no password).
 7. Verify the uhttpd listener the first-boot script wrote:
    `uci get uhttpd.main.listen_http` must print `<lan-ip>:80` — a bare
    `host:port`, never a CIDR (`192.168.5.1/24:80` makes uhttpd abort the

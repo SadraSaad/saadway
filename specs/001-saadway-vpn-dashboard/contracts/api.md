@@ -3,46 +3,50 @@
 **Feature**: 001-saadway-vpn-dashboard | **Date**: 2026-10-19
 
 The standalone dashboard's ONLY transport is `/ubus` (uhttpd-mod-ubus,
-JSON-RPC 2.0 over HTTPS/LAN). Every `saadway.*` call requires a valid ubus
-session token obtained via `session.login`; calls outside the ACL in
-`files/rpc-acl.json` are rejected by uhttpd before reaching the daemon
-(Principle V: exclusively authenticated APIs; FR-020/FR-021).
+JSON-RPC 2.0 over HTTPS/LAN). Since the auth bypass of 2026-10-21 (spec
+FR-020/FR-035, constitution v1.2.0, research.md D11) the dashboard performs
+**no** credential exchange: every `saadway.*` call carries rpcd's **default
+(unauthenticated) session id** and is authorized by the ACL group named
+`unauthenticated` in `files/rpc-acl.json`; calls outside that group are
+rejected by rpcd before reaching the daemon. The dashboard's access control
+is the platform's network boundary — the LAN-bound uhttpd listener and the
+firewall's WAN input policy (docs/verify-2512.md §7).
 
 Transport conventions (standard uhttpd-mod-ubus):
 
 ```json
 POST /ubus
 { "jsonrpc": "2.0", "id": 1, "method": "call",
-  "params": [ "<session-token>", "<ubus-object>", "<method>", "<msg>" ] }
+  "params": [ "<session-id>", "<ubus-object>", "<method>", "<msg>" ] }
 ```
 
-Login:
+The dashboard's client — tokenless (T079):
 
 ```json
 { "jsonrpc":"2.0", "id":1, "method":"call",
-  "params": [ "00000000000000000000000000000000", "session", "login",
-              { "username":"admin", "password":"<secret>" } ] }
+  "params": [ "00000000000000000000000000000000", "saadway", "mgmt.status",
+              {} ] }
 ```
 
-Response carries `ubus_rpc_session` (the token). Session tokens expire on
-inactivity (`dashboard.session_timeout`, default 1800 s; the dashboard
-requests the configured TTL at `session.login` using the
-`session_timeout` field returned by `mgmt.status`, falling back to
-1800 s before the first successful status call) and are never
-reused across devices. `username=admin` is validated by rpcd via
-the `$p$admin` shadow bridge (provisioned by
-`saadway-provision`; docs/verify-2512.md §2 — no daemon-side credential
-store, Constitution IV); `username=root` invokes system-root
-authentication mode.
+`"00000000000000000000000000000000"` is rpcd's
+`RPC_DEFAULT_SESSION_ID` (`openwrt/rpcd` `include/rpcd/session.h:35`) — the
+**default session**, which rpcd creates at startup with a NULL login
+section (`session.c:1396-1400`). With a NULL login section rpcd grants
+**only** the access group literally named `unauthenticated`
+(`session.c:944-946`) ⇒ that group is the dashboard's authorization
+mechanism. `uhttpd-mod-ubus` forwards every `/ubus` call to rpcd's
+`session.access` with the request's `params[0]` as the session id
+(`openwrt/uhttpd` `ubus.c:280-297`, `820-840`).
 
-The dashboard ships with the **default credential `admin` / `admin`**:
-`/usr/libexec/saadway/provision` creates the nologin user `admin` and
-applies the default password non-interactively — the plaintext is handed to
-the password setter over stdin and only the crypt(3) hash reaches the 0600
-`/etc/shadow` (never a UCI option, never a command argument, never the SPA
-page source). The default is changed with
-`/usr/libexec/saadway/provision passwd`; the compensating controls for the
-weak default are listed in docs/verify-2512.md §7.
+There is therefore **no** `session.login`, **no** `ubus_rpc_session`, **no**
+session TTL and **no** token in the DOM, in a URL or in a log line. The
+optional operator credential (`saadway_login` in `/etc/config/rpcd`) still
+exists for scripts and for the LuCI credentials tab: its secret is the
+`'$p$<user>'` **reference** — the hash stays in the 0600 `/etc/shadow`
+(provisioned by `saadway-provision`; docs/verify-2512.md §2 — no
+daemon-side credential store, Constitution IV), it is never published in
+the SPA page source, and **no default password is shipped** (the account is
+created on demand by the LuCI credentials tab).
 
 ---
 
@@ -56,7 +60,7 @@ All mutating calls are gated by ACL; all responses redact secrets (FR-021).
 |---|---|---|
 | `mgmt.status` | `{}` → `{ enabled, running, connection_status, active_profile, current_if, uptime_s, session_timeout }` | used by dashboard header + LuCI page; `session_timeout` feeds the login TTL (T053) |
 | `mgmt.set` | `{ enabled: bool }` → `{ applied }` | enable/disable service (LuCI + dashboard) |
-| `mgmt.credentials.set` | `{ username: string, password: string }` → `{ applied }` | **root-only** (ACL group `saadway-credentials`, NOT part of the dashboard's `saadway` group): applies the standalone dashboard's own login credential — the account is created if missing, the password is hashed by the platform's `passwd` (the plaintext is piped, never an argument), `/etc/config/rpcd` section `saadway_login` is updated (`username` + `password '$p$<user>'`) and rpcd is reloaded, so the new credential works immediately (FR-032). Never returns the secret (FR-033); invalid input → 400-class code, no change (FR-031) |
+| `mgmt.credentials.set` | `{ username: string, password: string }` → `{ applied }` | applies the **optional operator credential** (the `saadway_login` mapping) — the account is created if missing, the password is hashed by the platform's `passwd` (the plaintext is piped, never an argument), `/etc/config/rpcd` section `saadway_login` is updated (`username` + `password '$p$<user>'`) and rpcd is reloaded (FR-032). Never returns the secret (FR-033); invalid input → 400-class code, no change (FR-031). **Reachability changed with the auth bypass**: the panel's group grants it, but the LAN-scoped `unauthenticated` group covers the whole `saadway` object — so the method is LAN-reachable too (recorded as a deviation in docs/verify-2512.md §7) |
 
 ### Profiles (`profile.*`)
 
@@ -158,3 +162,7 @@ method, so it can never re-key its own login (FR-034).
 - No SSE/WebSocket push (polling chosen for footprint, research D7).
 - No WAN exposure; uhttpd ACL binds to LAN interface only.
 - No secret material in ANY response body or log entry (FR-021/SC-008).
+- **No authentication on the dashboard's own surface** — the access control
+  is the LAN-bound listener plus the firewall's WAN input policy, and the
+  ubus surface is limited to the `saadway` object through the
+  `unauthenticated` ACL group (FR-035).

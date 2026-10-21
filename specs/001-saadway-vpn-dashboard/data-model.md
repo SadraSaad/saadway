@@ -133,19 +133,35 @@ policy apply (User Story 6 scenario 4).
 
 ## Entity: DashboardCredential
 
-The standalone dashboard's login identity (research D10; spec FR-028 →
-FR-034):
+The **optional operator credential** of the `saadway_login` rpcd mapping
+(research D10/D11; spec FR-020/FR-028 → FR-035). Since the auth bypass
+(T079) the standalone dashboard has **no** credential of its own: it is
+authorized as rpcd's default (unauthenticated) session and its access
+control is the platform's network boundary.
 
-- **Username**: the login name of the dedicated dashboard account. Default
-  `admin`; changeable by the administrator from the LuCI "Dashboard
-  Credentials" tab.
+- **Username**: the login name of the dedicated dashboard account. Created
+  on demand (no default is shipped any more); changeable by the
+  administrator from the LuCI "Dashboard Credentials" tab.
 - **Secret**: kept ONLY in the restricted store (0600) and referenced — not
   copied — by the platform's login configuration. Never part of the
   credential as observed by any client: reads return at most the username.
-- **State**: *default* (initialized automatically on a fresh installation,
-  idempotently, never overwriting an administrator's change) or
-  *customized* (set through the LuCI credentials form, effective for the
-  next login immediately).
+- **State**: *absent* (the default on a fresh installation — the first-boot
+  path provisions no password) or *customized* (set through the LuCI
+  credentials form, effective for the next `session.login` immediately).
+
+### The dashboard's ubus method inventory (the authorized surface)
+
+The tokenless client calls exactly the methods of the `saadway` object that
+the SPA uses (`saadway/files/htdocs/saadway/js/app.js`): `mgmt.status`,
+`profile.list`, `profile.import_openvpn`, `profile.create_ikev2`,
+`profile.activate`, `profile.deactivate`, `profile.delete`, `steer.list`,
+`steer.domain.add`, `steer.domain.remove`, `steer.device.set`,
+`steer.device.remove`, `steer.iprange.set`, `sec.status`,
+`sec.kill_switch.set`, `mon.stats`, `mon.logs`, `mon.health_test`,
+`maint.backup.export`, `maint.backup.import`, `maint.cooldown.set`. The
+ACL group `unauthenticated` covers the whole `saadway` object — the
+published surface and the panel's surface therefore carry the same power
+set (recorded as a deviation in `docs/verify-2512.md` §7).
 
 **State transitions** (all applied in ONE atomic operation — the shadow
 account, the login mapping and the rpcd reload; a failure at any step

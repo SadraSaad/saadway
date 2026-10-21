@@ -39,7 +39,7 @@ stdin and is changed with `saadway-provision passwd` or from the LuCI
 credentials tab. The option values here are presentation/lifecycle
 preferences only.
 
-### The login mapping in `/etc/config/rpcd` (not part of `/etc/config/saadway`)
+### The optional login mapping in `/etc/config/rpcd` (not part of `/etc/config/saadway`)
 
 ```conf
 config login 'saadway_login'
@@ -49,10 +49,23 @@ config login 'saadway_login'
     list write 'saadway'
 ```
 
+- Since the auth bypass (T079 — spec FR-020/FR-035, constitution v1.2.0)
+  this mapping is the **optional operator credential**, NOT the dashboard's
+  entry point: the dashboard is authorized as rpcd's default
+  (unauthenticated) session through the ACL group named
+  **`unauthenticated`** in `saadway/files/rpc-acl.json` (installed to
+  `/usr/share/rpcd/acl.d/saadway.json`), which covers the `saadway` ubus
+  object only. The dashboard performs no `session.login` and creates no
+  session token.
+- The first-boot script provisions **no** default password (there is no
+  consumer for a well-known one); the account is created on demand by the
+  LuCI credentials tab.
 - The section name is cosmetic — rpcd matches a login section by its
   `username` option; it is named `saadway_login` and is maintained
   idempotently by `saadway/files/uci-defaults/50-saadway-rpcd` (create only
-  when missing, always refresh `username`/`password`, `uci commit rpcd`).
+  when missing, refresh `username`/`password` **only when the account
+  exists**, `uci commit rpcd`, and reload rpcd — rpcd binds the default
+  session's ACLs at startup, `openwrt/rpcd` `session.c:1396-1400`).
 - `option password '$p$<user>'` is a **reference**, not a secret: the hash
   stays in the 0600 `/etc/shadow`. The `<user>` suffix MUST equal the
   account name — upstream resolves it with `getspnam(<name>)` and compares

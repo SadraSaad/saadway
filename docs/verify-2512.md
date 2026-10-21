@@ -101,6 +101,28 @@ From `openwrt/rpcd` `session.c` (master, fetched 2026-10):
   `unauthenticated` in the login==NULL pass — upstream `unauthenticated.json`
   (see T-verify-1.2) grants exactly `session access/login`.
 
+**The tokenless client (Phase 24 / T079) — the mechanism the dashboard
+uses now.** The all-zero session id is not a login token but rpcd's
+**default session** (`openwrt/rpcd` `include/rpcd/session.h:35`:
+`RPC_DEFAULT_SESSION_ID = "00000000000000000000000000000000"`), created at
+startup with `rpc_login_setup_acls(ses, NULL)` (`session.c:1396-1400`).
+With a NULL login section `rpc_login_test_permission` returns true for
+**exactly one** group name — `unauthenticated` (`session.c:944-946`) ⇒ the
+mechanism is the ACL file's **group name**, not a login section.
+`uhttpd-mod-ubus` forwards every `/ubus` call to rpcd's `session.access`
+with the request's `params[0]` as the session id
+(`openwrt/uhttpd` `ubus.c:280-297`, `820-840`), so a call carrying the
+all-zero id is checked against the default session's grants. Two
+consequences the implementation depends on: (i) the ACL change only reaches
+the default session after rpcd restarts — the first-boot script MUST reload
+rpcd; (ii) the ACL file's `read`/`write` blocks are the permission buckets
+used for the login-section match and do **not** narrow the ubus method set
+(`session.c:993-1025` grants (scope, object, function) regardless of the
+bucket), so a `"*"` entry covers the whole object. The SPA therefore
+carries no token at all, and the panel's own `uci` scope is checked
+separately as `rpc_session_access(sid, "uci", <config>, "read"|"write")`
+(`uci.c:324-349`) — the scope names the CONFIG, never a section.
+
 **On-device checklist:**
 
 * `ls -l /etc/shadow` → mode 0600, owner root (shadow-mode assumption —
@@ -822,6 +844,23 @@ suite must be re-run against the **corrected** stub; the authoritative
   standalone dashboard may never re-key its own login (FR-034). The
   credential flow is audited offline by `tests/credential-flow-audit.sh`
   (T078).
+* auth-bypass assets (Phase 24 / T079): the standalone SPA is tokenless
+  (`saadway/files/htdocs/saadway/js/api.js` sends rpcd's all-zero default
+  session id; `js/app.js` has no login gate; `index.html` ships no login
+  markup; the five retired i18n keys are gone from both locales, parity
+  108=108), and the authorization is the ACL group named **`unauthenticated`**
+  in `saadway/files/rpc-acl.json` (→ `/usr/share/rpcd/acl.d/saadway.json`),
+  which reaches the `saadway` ubus object and **no** other object and
+  carries **no** `uci` scope. The LuCI view
+  (`luci-app-saadway/htdocs/luci-static/resources/view/saadway/dashboard.js`)
+  declares the built-in `view` module and binds `form.Map('saadway')` +
+  `TypedSection 'service'` — the service's own coordinates — and the app's
+  ACL group (`luci-app-saadway/root/usr/share/rpcd/acl.d/luci-app-saadway.json`)
+  grants the `uci` scope in the upstream shape (`"uci": [ "saadway" ]`).
+  `saadway/files/uci-defaults/50-saadway-rpcd` provisions **no** default
+  password, refreshes the credential mapping only when the account exists,
+  and still commits the package and reloads rpcd. Asserted by
+  `tests/luci-spa-audit.sh` (T080 — 17 findings against the pre-T079 tree).
 * uci-defaults assets (Phase 20 / T066): `40-saadway-uhttpd` →
   `/etc/uci-defaults/` writes the uhttpd listener options. The listener
   value is assembled ONLY from a validated bare IPv4 literal (four decimal
@@ -1029,6 +1068,58 @@ this phase; each traces to the appended tasks.md lines.
   and `make clean` removes it; unit suite 21/21. The authoritative
   `make package/saadway/{clean,compile}` on `ipq40xx/chromium` stays in
   the T046/T057 on-device round.
+
+---
+
+### Phase 24 record — LuCI rendering fix & standalone SPA auth bypass (T079–T081)
+
+* **Upstream sources the change was derived from** (fetched 2026-10-21,
+  upstream is the oracle): `openwrt/luci`
+  `modules/luci-base/htdocs/luci-static/resources/luci.js:1943-1951` and
+  `:2243` (the `View` class and the built-in module map `view: View` — a
+  view MUST declare `'require view';`; without it `view.extend` is
+  undefined → the reported `TypeError`), the same file's `form.js`
+  (`CBIMap`/`CBINamedSection`/`CBIMap.load` — a `form.Map` binds to exactly
+  ONE uci config and the map's load check is
+  `callSessionAccess('uci', <config>, 'write')`); `openwrt/rpcd`
+  `include/rpcd/session.h:35` (`RPC_DEFAULT_SESSION_ID` — the all-zero id
+  IS the default session), `session.c:944-946` (with a NULL login section
+  ONLY the group named `unauthenticated` is granted — the mechanism),
+  `session.c:1396-1400` (the default session's ACLs are granted once at
+  rpcd's startup ⇒ the first-boot script MUST reload rpcd),
+  `session.c:606-660`/`:1414` (the (scope, object, function) check with
+  fnmatch matching), `uci.c:324-349` (the uci scope's functions are
+  literally `read`/`write` — the scope names the CONFIG, never a section);
+  `openwrt/uhttpd` `ubus.c:280-297` and `:820-840` (every `/ubus` call is
+  checked through rpcd's `session.access` with `params[0]` as the session
+  id).
+* **Applied:** the LuCI view declares the built-in `view` module first and
+  binds `form.Map('saadway')` + `TypedSection 'service'` (the service's own
+  coordinates — `saadway/files/saadway.conf` → `config service 'service'`);
+  the app's ACL group grants the `uci` scope (`"uci": [ "saadway" ]`) plus
+  the ubus scope on the saadway object; `saadway/files/rpc-acl.json` gained
+  the access group literally named `unauthenticated` (the `saadway` object
+  only, no `uci` scope) and the `saadway` group's method lists became the
+  wildcard; the SPA sends rpcd's all-zero default session id on every
+  call, its login gate and session lifecycle are gone, the login markup and
+  the five i18n keys are retired (parity 108=108), and the footer note no
+  longer claims an authenticated API; the first-boot script provisions no
+  default password, refreshes the credential mapping only when the account
+  exists, and still commits the rpcd package and reloads rpcd.
+* **Host evidence:** `tests/luci-spa-audit.sh` (new, T080) — clean against
+  the shipped tree, **17 findings** against the pre-T079 tree;
+  `tests/credential-flow-audit.sh` and `tests/dashboard-credential-audit.sh`
+  re-based on the new contract (the pre-T075 and pre-T079 negative runs
+  still fail); the link / package-metadata / uci-defaults / service-startup
+  audits green; the unit suite 21/21; shellcheck clean on every audit; all
+  shipped JavaScript parses; all shipped JSON valid; the i18n locales 1:1.
+* **On-device evidence** stays in the T046/T057 round: the LuCI page
+  renders both tabs with an empty browser console, `/saadway/` opens
+  straight into the dashboard (no prompt, no token), every panel action
+  succeeds, the tokenless client is refused for every non-`saadway` ubus
+  object, and the dashboard is unreachable from the WAN side (SC-012,
+  SC-013). The residual risk of a LAN-scoped, unauthenticated dashboard
+  surface is recorded in section 7.
 
 ---
 
