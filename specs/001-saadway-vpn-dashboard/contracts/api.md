@@ -90,9 +90,9 @@ All steer mutations re-apply policy atomically; tunnel stays up
 
 | Method | Params → Returns | Notes |
 |---|---|---|
-| `sec.status` | `{}` → `{ kill_switch, dns_forced, contained }` | |
+| `sec.status` | `{}` → `{ kill_switch, dns_forced, contained }` | the **kill-switch** state only — `dns_forced` says whether the tunnel DNS redirect is active; the resolver and the leak verdict come from `sec.dns.status` (T091) |
 | `sec.kill_switch.set` | `{ enabled }` → `{ applied }` | opt-in toggle (FR-012), persists |
-| `sec.dns.status` | `{}` → `{ resolver_if, leak_risk }` | informational |
+| `sec.dns.status` | `{}` → `{ resolver_if, leak_risk }` | informational — **the only source** of `resolver_if` and `leak_risk` (they are NOT part of `sec.status`; the dashboard's security panel merges both payloads, T091) |
 
 ### Monitoring (`mon.*`)
 

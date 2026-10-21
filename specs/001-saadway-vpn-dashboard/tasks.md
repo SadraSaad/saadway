@@ -1178,7 +1178,7 @@ found **two** functional gaps and **one** documentation contradiction. The
 on-device items remain tracked as **T046** and **T057** (device-bound) and
 are NOT re-appended.
 
-- [ ] T091: Render the real DNS-leak status in the dashboard's security panel per FR-013, US2 (contradicts) — target files: `saadway/files/htdocs/saadway/js/app.js`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+- [X] T091: Render the real DNS-leak status in the dashboard's security panel per FR-013, US2 (contradicts) — target files: `saadway/files/htdocs/saadway/js/app.js`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
   - `js/app.js:376` — `tab_security()` calls **only** `saadway.mgmt.status`
     → `sec.status` and hands its payload to `dns_status_rows()`, which reads
     `dns_forced`, **`resolver_if`** and **`leak_risk`**. `sec.status`
@@ -1204,7 +1204,7 @@ are NOT re-appended.
     into T046/T057); the SPA parses (`node --check`); the i18n locales stay
     1:1.
 
-- [ ] T092: Add the OpenVPN profile's own settings form to the dashboard per US1/AC2, FR-002, FR-023 (missing) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
+- [X] T092: Add the OpenVPN profile's own settings form to the dashboard per US1/AC2, FR-002, FR-023 (missing) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
   - US1/AC2: *"Given an OpenVPN profile requiring credentials, **When** the
     administrator opens **its settings form**, Then a section titled 'Section
     to add an optional "auth-user-pass" file with your credentials' is
@@ -1236,7 +1236,7 @@ are NOT re-appended.
     the rendered profile (on-device proof folded into T046/T057);
     `tests/luci-spa-audit.sh` stays green.
 
-- [ ] T093: Supersede the obsolete authentication answers in the specification's clarification sessions per FR-020, FR-028 (partial) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
+- [X] T093: Supersede the obsolete authentication answers in the specification's clarification sessions per FR-020, FR-028 (partial) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
   - The clarification session of 2026-10-21 still answers: *"How is the
     default credential made available on a fresh installation …? → A: The
     default credential is initialized automatically during installation/first
@@ -1259,6 +1259,20 @@ are NOT re-appended.
     credential, a dashboard login or a dashboard session (a grep over the
     document for "default credential", "session" and "login" must show only
     the amended wording and the historical Q/A marked as superseded).
+
+**As implemented (T091–T093)** — two decisions worth recording:
+1. **T091 merged the two payloads** rather than replacing the call: the
+   security panel now fetches `sec.status` **and** `sec.dns.status` and
+   merges them, so the kill-switch rows keep their source and the DNS rows
+   finally get `resolver_if`/`leak_risk`; a missing `sec.dns.status` leaves
+   the "unknown" fallback instead of breaking the panel.
+2. **T092's settings form is a patch form**: the daemon's `profile.list`
+   payload exposes only `{ name, kind, enabled, order, secret_ref, active,
+   status }` — no hostname, no user name — and the stored secret is never
+   echoed (FR-033), so every field starts **empty** and an empty field
+   means "keep the current value". The OpenVPN credential pair travels
+   together (the daemon rejects a lone password with `E_BAD_SYNTAX`), which
+   the form checks before sending.
 
 **Checkpoint**: the dashboard shows the daemon's real DNS/leak-risk state,
 every profile can be configured from its own settings form through the

@@ -320,13 +320,17 @@ an active tunnel and verifying state recovery after reboot.
 - **Dashboard access from concurrently connected devices**: multiple
   simultaneous administrator sessions must be supported without one
   session invalidating another's configuration changes mid-edit.
-- **The default credential must not fight the administrator**: automatic
-  initialization of the default login must never overwrite a credential
-  the administrator has already changed — a reboot, an upgrade or a
-  repeated initialization MUST leave the customized credential untouched.
-- **A credential change while a dashboard session is open**: the session
-  that is already established keeps working until it expires on its own;
-  only subsequent logins use the new credential.
+- **The optional credential must not fight the administrator**: the
+  initialization of the optional `saadway_login` credential must never
+  overwrite a credential the administrator has already changed — a reboot,
+  an upgrade or a repeated initialization MUST leave the customized
+  credential untouched. (Amended 2026-10-21 with the auth bypass: there is
+  no default credential any more — the installation ships none, and the
+  optional credential is created on demand.)
+- **A credential change while a dashboard session is open**: **[SUPERSEDED
+  2026-10-21 by the auth bypass]** — the dashboard has no sessions, so the
+  case cannot occur; its calls are authorized as rpcd's default
+  (unauthenticated) session (FR-020, amended).
 - **Saving the credentials form with empty or mismatching input**: an
   empty username, an empty password or a confirmation that does not match
   the new password MUST be rejected with an inline explanation, and the
@@ -347,9 +351,31 @@ an active tunnel and verifying state recovery after reboot.
 ### Session 2026-10-21 — dashboard authentication & LuCI credential management
 
 - Q: May the LuCI page grow beyond status/toggle/dashboard-link? → A: Yes — a second, strictly bounded tab for the standalone dashboard's own login credential is added ("Dashboard Credentials" / تنظیمات ورود به داشبورد). Everything else stays prohibited; the dual-UI decoupling principle is amended accordingly (constitution v1.1.0, Principle V).
-- Q: How is the default credential made available on a fresh installation, given that a manual provisioning step left the dashboard unreachable ("wrong username or password")? → A: The default credential is initialized automatically during installation/first start, idempotently, and never overwrites a credential the administrator has already changed.
+- Q: How is the default credential made available on a fresh installation, given that a manual provisioning step left the dashboard unreachable ("wrong username or password")? → A: The default credential is initialized automatically during installation/first start, idempotently, and never overwrites a credential the administrator has already changed. **[SUPERSEDED 2026-10-21 by the auth bypass — see the session below: the installation ships no default password at all and the dashboard needs no credential.]**
 - Q: May the administrator change the username as well as the password? → A: Yes — both are changeable from the credentials tab; the tab is the single place where the credential is managed.
-- Q: Do dashboard sessions established before a credential change keep working? → A: Yes — they remain valid until they expire on their own inactivity window; only subsequent logins use the new credential.
+- Q: Do dashboard sessions established before a credential change keep working? → A: Yes — they remain valid until they expire on their own inactivity window; only subsequent logins use the new credential. **[SUPERSEDED 2026-10-21 by the auth bypass — see the session below: the dashboard has no sessions; its calls are authorized as rpcd's default (unauthenticated) session.]**
+
+### Session 2026-10-21 — the standalone dashboard's auth bypass (supersedes two answers above)
+
+- Q: May the standalone dashboard require a credential at all? → A: **No.**
+  The dashboard is reachable and fully operable **without any credential
+  prompt** (FR-020, amended): it performs no login, creates no session token
+  and its ubus calls are authorized as rpcd's **default (unauthenticated)
+  session** through the ACL group named `unauthenticated`, which covers the
+  `saadway` ubus object only (FR-035). The dashboard's access control is the
+  platform's network boundary — the LAN-bound uhttpd listener and the
+  firewall's WAN input policy — and the dashboard MUST NOT be reachable from
+  the WAN side. **This supersedes the answer above about making the default
+  credential available on a fresh installation: no default password is
+  shipped any more (FR-028, amended), and the optional `saadway_login`
+  credential is created on demand by the LuCI credentials tab.**
+- Q: What happens to a dashboard session when the credential changes? → A:
+  **The question no longer applies**: the dashboard has no sessions. The
+  optional rpcd credential governs the `saadway_login` mapping only (used by
+  scripts and by the LuCI credentials tab); it is not the dashboard's entry
+  point, and the dashboard's ubus surface is authorized by the
+  `unauthenticated` group. The residual risk of a LAN-scoped, unauthenticated
+  dashboard surface is recorded in `docs/verify-2512.md` §7.
 
 ## Requirements *(mandatory)*
 

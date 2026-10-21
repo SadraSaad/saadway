@@ -19,6 +19,11 @@
 	};
 
 	var poll = { stats: null, status: null, logs: null };
+	/* T092: the profile whose settings form is open (null = closed) and the
+	 * last profile list (the form pre-fills only what the daemon exposes —
+	 * the stored secret is NEVER sent back to the browser, FR-033). */
+	var editing_profile = null;
+	var profile_cache = [];
 	var logFollow = true;
 	var lastLogCursor = 0;
 	var rxHist = [], txHist = [];
@@ -107,12 +112,60 @@
 			"</span>";
 	}
 
+	/* T092 (US1/AC2, FR-002): the profile's OWN settings form. Every field
+	 * starts empty and means "keep the current value" — the daemon never
+	 * echoes a stored secret (FR-033), so an empty field is the only safe
+	 * representation of "unchanged". */
+	function profile_edit_card() {
+		if (!editing_profile)
+			return "";
+		var p = editing_profile;
+		var is_ike = p.kind === "ikev2";
+		var html = '<div class="card"><h3>' + esc(T("profile_settings")) +
+			" — " + esc(p.name) + "</h3>" +
+			'<label class="switch"><input type="checkbox" id="pf-enabled"' +
+			(p.enabled ? " checked" : "") +
+			'><span class="slider"></span></label>';
+
+		if (is_ike) {
+			html += "<label>" + esc(T("ike_username")) + "</label>" +
+				'<input id="pf-ike-user" autocomplete="off" dir="ltr">' +
+				"<label>" + esc(T("ike_password")) + "</label>" +
+				'<input id="pf-ike-pass" type="password" autocomplete="new-password">' +
+				"<label>" + esc(T("edit_ike_remote")) + "</label>" +
+				'<input id="pf-remote" autocomplete="off" spellcheck="false" dir="ltr">' +
+				"<label>" + esc(T("edit_ike_local")) + "</label>" +
+				'<input id="pf-local" autocomplete="off" spellcheck="false" dir="ltr">' +
+				"<label>" + esc(T("ike_cert")) + "</label>" +
+				'<input type="text" readonly value="' + esc(T("ike_cert_value")) + '">';
+		} else {
+			html += "<label>" + esc(T("edit_hostname")) + "</label>" +
+				'<input id="pf-host" autocomplete="off" spellcheck="false" dir="ltr">' +
+				/* FR-002: the optional auth-user-pass credentials - the
+				 * stored secret is never shown, only replaced. */
+				'<fieldset class="sub"><legend>' +
+				esc(T("import_creds_title")) + "</legend>" +
+				"<label>" + esc(T("import_user")) + "</label>" +
+				'<input id="pf-user" autocomplete="off" dir="ltr">' +
+				"<label>" + esc(T("import_pass")) + "</label>" +
+				'<input id="pf-pass" type="password" autocomplete="new-password">' +
+				"</fieldset>";
+		}
+		html += '<p class="muted">' + esc(T("edit_keep_hint")) + "</p>" +
+			'<button class="btn primary" data-act="edit-save">' +
+			esc(T("edit_save")) + "</button> " +
+			'<button class="btn" data-act="edit-cancel">' +
+			esc(T("edit_cancel")) + "</button></div>";
+		return html;
+	}
+
 	function tab_profiles() {
 		stop_poll("stats", "logs");
 		SwApi.saadway("profile.list").then(function (r) {
 			if (!r.ok) { toast(T("save_error"), true); return; }
+			profile_cache = r.data.profiles || [];
 			var rows = "";
-			(r.data.profiles || []).forEach(function (p) {
+			profile_cache.forEach(function (p) {
 				rows += "<tr><td>" + esc(p.name) + (p.active ?
 					' <span class="chip ok">' + esc(T("active_pin")) + "</span>" : "") +
 					"</td><td>" +
@@ -120,6 +173,8 @@
 					"</td><td>" + status_chip(p.status) + " · " +
 					esc(p.enabled ? T("profile_enabled") : T("profile_disabled")) +
 					"</td><td>";
+				rows += '<button class="btn small" data-act="edit" data-name="' +
+					esc(p.name) + '">' + esc(T("edit_profile")) + "</button> ";
 				rows += '<button class="btn small" data-act="activate" data-name="' +
 					esc(p.name) + '">' + esc(T("activate")) + "</button> ";
 				rows += '<button class="btn small danger" data-act="delete" data-name="' +
@@ -191,7 +246,8 @@
 				"<label>" + esc(T("ike_enc")) + "</label>" +
 				'<p class="muted">' + esc(T("ike_enc_value")) + "</p>" +
 				'<button class="btn primary" data-act="ike-create">' +
-				esc(T("ike_create")) + "</button></div>";
+				esc(T("ike_create")) + "</button></div>" +
+				(profile_edit_card());
 			/* FR-004: a custom identity is only asked for when it is
 			 * actually selected ("Same as ..." is the default). */
 			var rmode = $("#ike-remote-mode"), lmode = $("#ike-local-mode");
@@ -241,6 +297,72 @@
 			SwApi.saadway("profile.deactivate").then(function (r) {
 				if (r.ok) { tab_profiles(); refresh_status(); }
 				else toast(err_of(r, T), true);
+			});
+			return;
+		}
+		if (act === "edit") {
+			/* open the profile's settings form (US1/AC2) */
+			var ename = btn.getAttribute("data-name");
+			editing_profile = null;
+			for (var pi = 0; pi < profile_cache.length; pi++)
+				if (profile_cache[pi].name === ename)
+					editing_profile = profile_cache[pi];
+			tab_profiles();
+			return;
+		}
+		if (act === "edit-cancel") {
+			editing_profile = null;
+			tab_profiles();
+			return;
+		}
+		if (act === "edit-save") {
+			var ep = editing_profile;
+			if (!ep) return;
+			var patch = {};
+			var chk = $("#pf-enabled");
+			if (chk && chk.checked !== !!ep.enabled)
+				patch.enabled = chk.checked;
+			var phost = $("#pf-host");
+			if (phost && phost.value.trim())
+				patch.hostname = phost.value.trim();
+			if (ep.kind === "ikev2") {
+				var iku = $("#pf-ike-user"), ikp = $("#pf-ike-pass");
+				if (iku && iku.value.trim())
+					patch.username = iku.value.trim();
+				if (ikp && ikp.value)
+					patch.password = ikp.value;
+				var prem = $("#pf-remote");
+				if (prem && prem.value.trim())
+					patch.remote_id = prem.value.trim();
+				var ploc = $("#pf-local");
+				if (ploc && ploc.value.trim())
+					patch.local_id = ploc.value.trim();
+			} else {
+				/* the OpenVPN credentials travel together: the daemon
+				 * writes the auth-user-pass file from both (a lone
+				 * password is rejected with E_BAD_SYNTAX). */
+				var pusr = $("#pf-user"), ppw = $("#pf-pass");
+				if (ppw && ppw.value) {
+					if (!pusr || !pusr.value.trim()) {
+						toast(T("edit_cred_required"), true);
+						return;
+					}
+					patch.username = pusr.value.trim();
+					patch.password = ppw.value;
+				}
+			}
+			if (!Object.keys(patch).length) {
+				editing_profile = null;
+				tab_profiles();
+				return;
+			}
+			SwApi.saadway("profile.update",
+				{ name: ep.name, patch: patch }).then(function (r) {
+				if (r.ok) {
+					editing_profile = null;
+					toast(T("applied"), false);
+					tab_profiles();
+				} else toast(err_of(r), true);
 			});
 			return;
 		}
@@ -373,8 +495,22 @@
 
 	function tab_security() {
 		stop_poll("stats", "logs");
-		SwApi.saadway("sec.status").then(function (r) {
+		/* T091 (FR-013/US2): the DNS rows read resolver_if + leak_risk,
+		 * which the daemon returns from sec.dns.status - NOT from
+		 * sec.status (that one carries kill_switch/dns_forced/contained).
+		 * Both payloads are merged; a missing sec.dns.status leaves the
+		 * "unknown" fallback instead of breaking the panel. */
+		Promise.all([
+			SwApi.saadway("sec.status"),
+			SwApi.saadway("sec.dns.status"),
+		]).then(function (res) {
+			var r = res[0], dns = res[1];
 			if (!r.ok) { toast(T("save_error"), true); return; }
+			var merged = {};
+			var k;
+			for (k in r.data || {}) merged[k] = r.data[k];
+			if (dns.ok && dns.data)
+				for (k in dns.data) merged[k] = dns.data[k];
 			$("#panel-security").innerHTML =
 				'<div class="card"><h2>' + esc(T("sec_title")) + "</h2>" +
 				"<h3>" + esc(T("kill_switch")) + "</h3>" +
@@ -385,7 +521,7 @@
 				(r.data.contained ? ' <span class="chip warn">' +
 					esc(T("conn_contained")) + "</span>" : "") +
 				"<h3>" + esc(T("dns_head")) + "</h3>" +
-				(dns_status_rows(r.data)) +
+				(dns_status_rows(merged)) +
 				"</div>";
 		});
 	}

@@ -1164,6 +1164,47 @@ this phase; each traces to the appended tasks.md lines.
   JavaScript parses, all shipped JSON valid, the i18n locales 1:1, and the
   plan's project-structure tree lists only files that exist.
 
+### Phase 26 record — the DNS-status panel and the profile settings form (T091–T093)
+
+* **T091 — the zero-leak rows could never show the truth.** The dashboard's
+  security panel called **only** `sec.status` (`{ kill_switch, dns_forced,
+  contained }`) and fed that payload to `dns_status_rows()`, which reads
+  `resolver_if` and `leak_risk` — those two fields are returned by
+  **`sec.dns.status`** (`{ resolver_if, leak_risk }`), so they were always
+  `undefined` and the panel rendered "—" and "unknown" (FR-013/US2). The
+  panel now fetches both methods and merges the payloads (a missing
+  `sec.dns.status` leaves the "unknown" fallback), and `contracts/api.md`
+  states which method owns which field.
+* **T092 — the profile's own settings form (US1/AC2, FR-002, FR-023).** The
+  dashboard had no per-profile form: the credential fields existed only in
+  the import card and the SPA called `profile.update` **zero** times, even
+  though the daemon implements the whole patch surface
+  (`enabled`/`hostname`/`username`/`password`/`remote_id`/`local_id`/
+  `cert_mode`/proposals — `saadway/src/ubus.c:465`). The profile list now
+  carries an **edit** action that opens the form: the enabled switch, the
+  OpenVPN hostname, the FR-002 credential section and — for IKEv2 — the EAP
+  credentials plus the FR-004 identities. The form is a **patch form**:
+  every field starts empty (the daemon's `profile.list` exposes no hostname
+  or user name and never echoes a secret, FR-033), an empty field means
+  "keep the current value", the OpenVPN credential pair travels together
+  (the daemon rejects a lone password with `E_BAD_SYNTAX`) and the change
+  is applied with **one** `profile.update` call whose rejections are shown
+  inline.
+* **T093 — the specification no longer contradicts itself.** The 2026-10-21
+  clarification session still claimed that the default credential is made
+  available automatically and that dashboard sessions survive a credential
+  change; the two obsolete answers and the two obsolete edge cases are now
+  marked **SUPERSEDED**, and a new session records the auth-bypass model
+  (no credential, no session, the `unauthenticated` ACL group, the
+  network-boundary access control, and the §7 residual risk). The FR/SC
+  text, the user stories and their acceptance scenarios were **not**
+  changed.
+* **Host evidence**: all seven host audits green, the unit suite 21/21, the
+  14-module `-Wall -Wextra` sweep clean, shellcheck clean, all shipped
+  JavaScript parses, all shipped JSON valid, the i18n locales **129 = 129**,
+  and the spec's obsolete-claim grep shows only the amended wording and the
+  marked history.
+
 ---
 
 **Traceability:** Gates 1–7 are executed by `quickstart.md` scenarios 1–7
