@@ -131,6 +131,22 @@ steering rules, service preferences, and a mac/uci checksum. Import =
 validate → dedupe → per-item report (restored / needs-attention) → atomic
 policy apply (User Story 6 scenario 4).
 
+## Entity: DashboardCredential
+
+The standalone dashboard's login identity (research D10; spec FR-028 →
+FR-034):
+
+- **Username**: the login name of the dedicated dashboard account. Default
+  `admin`; changeable by the administrator from the LuCI "Dashboard
+  Credentials" tab.
+- **Secret**: kept ONLY in the restricted store (0600) and referenced — not
+  copied — by the platform's login configuration. Never part of the
+  credential as observed by any client: reads return at most the username.
+- **State**: *default* (initialized automatically on a fresh installation,
+  idempotently, never overwriting an administrator's change) or
+  *customized* (set through the LuCI credentials form, effective for the
+  next login immediately).
+
 ## Entity: DashboardSession
 
 Handling via uhttpd-mod-ubus ubus sessions (research D7; rpcd shadow bridge

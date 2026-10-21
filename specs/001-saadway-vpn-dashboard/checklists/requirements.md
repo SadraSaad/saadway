@@ -31,11 +31,26 @@
 
 ## Notes
 
-- Validation passed on first iteration (2026-10-19); no spec updates required.
-- 0 [NEEDS CLARIFICATION] markers — the feature description supplied defaults
-  for all ambiguous points; remaining defaults are documented in the spec's
-  Assumptions section (default failover attempts, one-active-profile model,
-  LAN-only dashboard, bundled banking/local IP classification).
-- Constitution cross-check: FR-013/FR-014/FR-018/FR-020/FR-021/FR-022/FR-023/
-  FR-024 encode the six constitution principles at feature level; deeper
-  technical verification belongs to `/speckit.plan` and quality gates.
+- **Re-validated 2026-10-21** after the dashboard-authentication amendment
+  (User Story 4, FR-022 amended, FR-028–FR-034 added, SC-009–SC-011 added,
+  `DashboardCredential` entity, 4 new edge cases, 4 new clarification
+  decisions). All 16 items still pass — the additions are behavioural
+  (what the administrator observes), name no implementation mechanism, and
+  every new requirement carries a measurable outcome.
+- 0 [NEEDS CLARIFICATION] markers — the operator's instruction supplied the
+  default credential, the tab structure, the field set and the save
+  behaviour; the remaining defaults (automatic & idempotent initialization,
+  sessions surviving a credential change until they expire, the panel's own
+  session model, the Persian wording as the intended phrasing) are recorded
+  in the spec's Assumptions section and ratified as research decision D10.
+- Constitution cross-check: the credential-management tab is a **bounded
+  exception** to Principle V ("LuCI = status + toggle + link only"), so the
+  constitution was amended to **v1.1.0** (MINOR) — Principle V and quality
+  gate 6 now explicitly permit the standalone dashboard's own login form,
+  with the rationale and migration impact in the amendment log
+  (maintainer-approved 2026-10-21). The amendment is mirrored in the
+  tracked decision record `research.md` D10, because `.specify/` is not
+  version-controlled.
+- FR-021 remains the binding constraint on the new surface: the stored
+  secret is never displayed, returned or logged (FR-033, SC-011), and the
+  form requires an authenticated administrative session (FR-034).

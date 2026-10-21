@@ -98,8 +98,11 @@ listed in docs/verify-2512.md §7). Alternative mode: set
 
 ## Scenario 4 — Dual UI + session security (Story 4; Gate 6)
 
-1. LuCI page shows ONLY status + enable/disable + open-dashboard button
-   (FR-022) — no settings controls.
+1. LuCI page shows EXACTLY two tabs (FR-022): *Status & Control* (status +
+   enable/disable + open-dashboard button) and *Dashboard Credentials*
+   (تنظیمات ورود به داشبورد — new username / new password / confirmation /
+   Save & Apply). No other settings controls; the stored password is never
+   displayed (FR-033).
 2. Request dashboard resource without session: every `saadway.*` RPC via
    `/ubus` is denied (401-level; Gate 6).
 3. Login creates ubus session; second unauthenticated device cannot use
@@ -107,7 +110,13 @@ listed in docs/verify-2512.md §7). Alternative mode: set
    `dashboard.session_timeout` of inactivity.
 4. Verify SPA is Persian RTL by default with fa/en switch; preference
    persists (FR-027).
-5. Verify the uhttpd listener the first-boot script wrote:
+5. Verify the default credential is initialized: on a fresh installation
+   the dashboard accepts the default credentials with **0** manual steps
+   (FR-028/SC-009); after changing them in the LuCI credentials tab, the
+   new values are accepted and the old ones rejected within 5 s
+   (FR-032/SC-010); a mismatching confirmation is rejected without any
+   change (FR-031).
+6. Verify the uhttpd listener the first-boot script wrote:
    `uci get uhttpd.main.listen_http` must print `<lan-ip>:80` — a bare
    `host:port`, never a CIDR (`192.168.5.1/24:80` makes uhttpd abort the
    bind with `getaddrinfo(): Name does not resolve` and leaves the SPA

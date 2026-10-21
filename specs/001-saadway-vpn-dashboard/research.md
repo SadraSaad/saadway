@@ -196,7 +196,9 @@ loop); single cycle then manual-only (rejected — clarification chose A).
 - LuCI page = `luci-app-saadway` client-side JS view: reads service status,
   toggles enabled/disabled via ubus `saadway.mgmt.set` (through LuCI's own
   authenticated ubus path), renders an Open Dashboard button. No settings
-  exposed there (FR-022).
+  exposed there (FR-022). **Superseded in part by D10** (2026-10-21): the
+  LuCI surface now also carries the dashboard's own login-credential form
+  (constitution v1.1.0, Principle V).
 
 **Rationale**: uhttpd-mod-ubus is stock OpenWrt infra (build-time task:
 verify package presence in the official 25.12 feed — `ubus` over HTTP with
@@ -259,6 +261,53 @@ constitution Section 3 gates 1–7.
 **Alternatives considered**: pytest-driven device farm — banned runtime not
 required and adds infra; skipping on-device layer — unacceptable for gate 4/5
 (nftables/leak behavior cannot be host-tested meaningfully).
+
+## D10. Dashboard credential lifecycle & the LuCI credentials tab (Principle V, amendment v1.1.0)
+
+**Decision**:
+- The standalone dashboard's login identity is a **dedicated system user**
+  whose secret lives ONLY in the restricted store (0600), referenced from
+  the platform's own login configuration through the `$p$<name>` bridge.
+  Upstream resolves that suffix with `getspnam(<name>)` and compares the
+  candidate through `rpc_login_test_password()`
+  (`openwrt/rpcd` `session.c:832-858`) — so the reference NAMES the account
+  and the secret never travels through a world-readable configuration
+  option (FR-021, Constitution IV).
+- The **default credential is initialized automatically** during
+  installation/first start, idempotently: a fresh installation must accept
+  the documented default with **zero** manual steps (FR-028, SC-009), and
+  re-initialization MUST NOT overwrite a credential the administrator has
+  already changed. The secret is applied **over stdin** (the platform's
+  `chpasswd` reads `user:password` from stdin; `passwd` and `cryptpw` are
+  the fallbacks) because a command argument is readable through
+  `/proc/<pid>/cmdline`.
+- The **LuCI page gains a second, strictly bounded tab** — "Dashboard
+  Credentials" / تنظیمات ورود به داشبورد — carrying the new username, the
+  new password, the confirmation and a *Save & Apply* action (FR-029 →
+  FR-032). This is the single bounded exception to the dual-UI decoupling
+  rule and is recorded as **constitution v1.1.0** (Principle V + quality
+  gate 6, amendment log entry of 2026-10-21). The standalone dashboard's
+  API surface, its session model and its "no configuration UI" split are
+  unchanged: the credential form manages the dashboard's OWN login, not the
+  service's configuration.
+- The form is authorized by the **platform panel's own administrative
+  session** (FR-034); it introduces no credential of its own, never returns
+  the stored secret (FR-033) and rejects invalid input without changing
+  anything (FR-031).
+
+**Rationale**: the administrator could otherwise neither replace the
+default credential nor initialize it from the panel — the only path was a
+shell step, and a fresh installation consequently rejected the documented
+default with "wrong username or password". The credential is a lifecycle
+concern of the dashboard's login, so keeping its single form in the panel
+does not erode the decoupling the standalone dashboard exists for.
+
+**Alternatives considered**: managing the credential inside the standalone
+dashboard (would put a credential-change surface behind a credential, and
+it contradicts the dual-UI split); keeping a shell-only path (reproduces
+the reported failure mode); storing the secret in the service's own
+configuration (violates FR-021 / Constitution IV — the platform already
+provides a restricted, non-readable store).
 
 ## Open questions for build-time verification (tracked, all low-risk)
 

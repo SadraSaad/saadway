@@ -127,11 +127,22 @@ JSON-RPC envelopes `-32002` "Access denied" / `-32000` "Object not found"
 / `-32003` request timeout for pre-call rejections. Full mapping and
 on-device checklist: `docs/verify-2512.md` (T-verify-6, Phase 15/T061).
 
-## LuCI page surface (FR-022 — nothing more)
+## LuCI page surface (FR-022 — exactly two tabs)
 
-`luci-app-saadway` view reads `mgmt.status` and toggles via `mgmt.set`
-through LuCI's own ubus session; renders one "Open Dashboard" link to the
-SPA (`http://<router>/saadway/`). No configuration UI inside LuCI.
+`luci-app-saadway` view is tabbed:
+
+- **Status & Control** — reads `mgmt.status` and toggles via `mgmt.set`
+  through LuCI's own ubus session; renders one "Open Dashboard" link to the
+  SPA (`http://<router>/saadway/`).
+- **Dashboard Credentials** (تنظیمات ورود به داشبورد) — the login-credential
+  form of the standalone dashboard: new username (نام کاربری جدید), new
+  password (رمز عبور جدید), password confirmation (تکرار رمز عبور) and a
+  *Save & Apply* action (FR-029 → FR-032). The action requires an
+  authenticated administrative session (FR-034) and never returns the
+  stored secret (FR-033); the standalone dashboard's own API surface is
+  unchanged.
+
+No other configuration UI inside LuCI (constitution v1.1.0, Principle V).
 
 ## Non-goals
 

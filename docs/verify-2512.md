@@ -684,6 +684,29 @@ suite must be re-run against the **corrected** stub; the authoritative
   0600 `/etc/shadow` row, no credential material in the page source) is
   folded into the T046/T057 round.
 
+* **Specification amendment (2026-10-21) — dashboard authentication & LuCI
+  credential management.** The maintainer requested (a) a reliably
+  initialized default dashboard credential (`admin` / `admin`) and (b) a
+  second, strictly bounded LuCI tab for managing that credential. (a)
+  changes the shipped behaviour: the credential used to exist only after a
+  manual provisioning step, so a fresh installation rejected the documented
+  default ("wrong username or password"). (b) conflicts with the
+  dual-UI rule, so the **constitution was amended to v1.1.0** (MINOR):
+  Principle V and quality gate 6 now permit the standalone dashboard's own
+  login-credential form inside LuCI (single bounded exception), with the
+  rationale and migration impact in the constitution's amendment log —
+  mirrored in the tracked decision record `research.md` D10 (the
+  `.specify/` tree is not version-controlled). The spec now carries
+  FR-022 (amended), FR-028 → FR-034, SC-009 → SC-011, the
+  `DashboardCredential` entity, four new edge cases and four new
+  clarification decisions; the implementation phase for it is still to be
+  created (`/speckit.tasks`). The upstream facts it rests on are unchanged
+  and were verified again for this round: `openwrt/rpcd` `session.c:832-858`
+  (the `$p$<name>` bridge — `getspnam(hash + 3)` +
+  `rpc_login_test_password`) and `openwrt/openwrt`
+  `package/utils/busybox/config/loginutils/Config.in` (`chpasswd` /
+  `cryptpw` — the password is applied over stdin, never through argv).
+
 ## 9. Footprint pointers → T045
 
 * Zero references to iptables/ipset/fw3 in the whole tree (Gate 1/2) —

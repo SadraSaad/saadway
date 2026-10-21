@@ -151,29 +151,39 @@ observing which path the respective traffic takes.
 ### User Story 4 - Dual-UI Experience: LuCI Controller + Standalone Dashboard (Priority: P2)
 
 The administrator gets two complementary user interfaces. A simple page
-inside the router's LuCI panel shows only the service running status,
-lets them turn the service on/off (enable/disable), and offers a button
-that opens the dedicated dashboard. The standalone web dashboard —
-completely independent of the LuCI look/feel and templates — hosts all
-proxy settings, routing rules, live monitoring, and maintenance tools,
-and is protected by its own username/password (or the router's root
-authentication) using secure session tokens so other LAN clients cannot
-access it.
+inside the router's LuCI panel is tabbed: the *Status & Control* tab shows
+the service running status, lets them turn the service on/off
+(enable/disable), and offers a button that opens the dedicated dashboard;
+the *Dashboard Credentials* tab (تنظیمات ورود به داشبورد) lets them set the
+dashboard's own login username and password without leaving the panel. The
+standalone web dashboard — completely independent of the LuCI look/feel and
+templates — hosts all proxy settings, routing rules, live monitoring, and
+maintenance tools, and is protected by its own username/password (or the
+router's root authentication) using secure session tokens so other LAN
+clients cannot access it. On a fresh installation the dashboard credential
+is initialized automatically, so the dashboard is reachable with the default
+credentials out of the box — no manual provisioning step.
 
 **Why this priority**: The dual-UI structure shapes the whole delivery:
 a thin, stable control surface for routine use, and a full modern UI for
 advanced work. It is needed to reach every other story's workflows.
 
 **Independent Test**: Can be fully tested by visiting the LuCI page and
-verifying only status/toggle/dashboard-link are offered, then opening
-the standalone dashboard and attempting access without credentials
-(declined) and with valid credentials (accepted, session established).
+verifying that exactly two tabs are offered — status/toggle/dashboard-link
+on the first, the credentials form on the second — then opening the
+standalone dashboard and attempting access without credentials (declined)
+and with valid credentials (accepted, session established); on a fresh
+installation the default credentials must be accepted without any manual
+step, and a credential change made in the LuCI tab must be accepted by the
+dashboard immediately.
 
 **Acceptance Scenarios**:
 
 1. **Given** the router's LuCI panel, **When** the administrator opens
-   the SaadWay page, **Then** they see only the service status, an
-   on/off control, and a button that opens the standalone dashboard.
+   the SaadWay page, **Then** they see exactly two tabs — *Status &
+   Control* (the service status, an on/off control and a button that opens
+   the standalone dashboard) and *Dashboard Credentials* (the login-credential
+   form) — and nothing else.
 2. **Given** the LuCI page, **When** the administrator toggles service
    enable/disable, **Then** the service state changes accordingly and
    the LuCI page reflects it.
@@ -183,6 +193,21 @@ the standalone dashboard and attempting access without credentials
 4. **Given** valid dashboard credentials, **When** the administrator
    logs in, **Then** a secure session is created which cannot be reused
    by another unauthenticated LAN client, and it expires on inactivity.
+5. **Given** a fresh installation where the dashboard credential has not
+   been customized yet, **When** the administrator opens the standalone
+   dashboard and logs in with the default credentials, **Then** the login
+   succeeds — no manual provisioning step is required beforehand.
+6. **Given** the LuCI page, **When** the administrator opens the
+   *Dashboard Credentials* tab, **Then** they see exactly three input
+   fields — new username, new password, password confirmation — plus a
+   *Save & Apply* action, and the stored password is not shown.
+7. **Given** the credentials tab filled with a new username and a matching
+   new password and confirmation, **When** the administrator saves, **Then**
+   the standalone dashboard accepts the new credentials immediately and
+   rejects the previous ones.
+8. **Given** the credentials tab filled with a new password whose
+   confirmation does not match, **When** the administrator saves, **Then**
+   nothing is changed and an inline message explains the mismatch.
 
 ---
 
@@ -293,6 +318,20 @@ an active tunnel and verifying state recovery after reboot.
 - **Dashboard access from concurrently connected devices**: multiple
   simultaneous administrator sessions must be supported without one
   session invalidating another's configuration changes mid-edit.
+- **The default credential must not fight the administrator**: automatic
+  initialization of the default login must never overwrite a credential
+  the administrator has already changed — a reboot, an upgrade or a
+  repeated initialization MUST leave the customized credential untouched.
+- **A credential change while a dashboard session is open**: the session
+  that is already established keeps working until it expires on its own;
+  only subsequent logins use the new credential.
+- **Saving the credentials form with empty or mismatching input**: an
+  empty username, an empty password or a confirmation that does not match
+  the new password MUST be rejected with an inline explanation, and the
+  stored credential MUST stay exactly as it was.
+- **A client without an administrative session reaching the credentials
+  form**: the form and its action MUST be unreachable, and the stored
+  credential MUST NOT be readable.
 
 ## Clarifications
 
@@ -302,6 +341,13 @@ an active tunnel and verifying state recovery after reboot.
 - Q: Should the kill switch be enabled automatically from the very first install, or stay off until the administrator turns it on? → A: Disabled by default (Option B) — leak protection stays off until the administrator explicitly enables the kill switch.
 - Q: After failover has already tried every saved profile once and none connected, what should the system do next? → A: Cool-down retry (Option A) — after one full failed cycle, wait a configurable cool-down interval and re-attempt the cycle, repeating until a profile connects.
 - Q: Which language should the standalone dashboard's interface ship in first? → A: Persian-first (Option A) — right-to-left layout by default with an optional English language switch in the dashboard.
+
+### Session 2026-10-21 — dashboard authentication & LuCI credential management
+
+- Q: May the LuCI page grow beyond status/toggle/dashboard-link? → A: Yes — a second, strictly bounded tab for the standalone dashboard's own login credential is added ("Dashboard Credentials" / تنظیمات ورود به داشبورد). Everything else stays prohibited; the dual-UI decoupling principle is amended accordingly (constitution v1.1.0, Principle V).
+- Q: How is the default credential made available on a fresh installation, given that a manual provisioning step left the dashboard unreachable ("wrong username or password")? → A: The default credential is initialized automatically during installation/first start, idempotently, and never overwrites a credential the administrator has already changed.
+- Q: May the administrator change the username as well as the password? → A: Yes — both are changeable from the credentials tab; the tab is the single place where the credential is managed.
+- Q: Do dashboard sessions established before a credential change keep working? → A: Yes — they remain valid until they expire on their own inactivity window; only subsequent logins use the new credential.
 
 ## Requirements *(mandatory)*
 
@@ -387,8 +433,10 @@ an active tunnel and verifying state recovery after reboot.
   access and MUST NEVER be displayed in live logs, monitoring panels, or
   any response provided without prior authentication.
 - **FR-022**: A lightweight page inside the router's LuCI panel MUST
-  offer exactly: service status display, on/off enable/disable control,
-  and a button opening the standalone dashboard — and nothing more.
+  offer exactly two tabs and nothing beyond them: **(1) Status & Control** —
+  service status display, on/off enable/disable control, and a button
+  opening the standalone dashboard — and **(2) Dashboard Credentials** — the
+  login-credential form specified in FR-030.
 - **FR-023**: The standalone dashboard MUST be a fully independent web
   panel (not built from the LuCI templates/rendering), delivering all
   proxy configuration, routing, monitoring, and maintenance functions.
@@ -404,6 +452,35 @@ an active tunnel and verifying state recovery after reboot.
   incomplete/syntactically invalid files with a specific error and no
   partial save) and MUST detect duplicate bypass entries (rejecting or
   merging with clear feedback).
+- **FR-028**: On a fresh installation the standalone dashboard MUST be
+  reachable with the default credentials (username `admin`, password
+  `admin`) **without any manual provisioning step**; the initialization of
+  that default credential MUST be automatic and idempotent, and MUST NOT
+  overwrite a credential the administrator has already changed.
+- **FR-029**: The LuCI page MUST present the two tabs of FR-022, and the
+  second tab MUST be titled "Dashboard Credentials" (تنظیمات ورود به
+  داشبورد).
+- **FR-030**: The "Dashboard Credentials" tab MUST provide exactly three
+  input fields — **New Username** (نام کاربری جدید), **New Password**
+  (رمز عبور جدید) and **Password Confirmation** (تکرار رمز عبور) — plus
+  one **Save & Apply** action; the password fields MUST be masked and MUST
+  NOT be pre-filled with the stored secret.
+- **FR-031**: The Save & Apply action MUST validate the input — a
+  non-empty username, a non-empty password, and a confirmation that
+  matches the new password — and MUST reject invalid input with an inline,
+  actionable message while leaving the stored credential unchanged.
+- **FR-032**: After a successful save, the new credential MUST be accepted
+  by the standalone dashboard login immediately (no restart, no
+  re-provisioning step), and the previous credential MUST stop being
+  accepted.
+- **FR-033**: The credential surface MUST NOT display or return any stored
+  secret: reading the current configuration MUST reveal at most the
+  username, and no stored password may appear in any response, log, page
+  source or monitor panel (extends FR-021).
+- **FR-034**: The "Dashboard Credentials" tab and its action MUST be
+  reachable only from an authenticated administrative session of the
+  router's panel; an unauthenticated or non-administrative client MUST
+  neither read nor change the credential.
 - **FR-026**: System MUST handle the combined-active case of failover +
   kill switch during a total WAN outage by halting repeated profile
   cycling (no infinite loop), keeping clients contained, and resuming
@@ -434,6 +511,12 @@ an active tunnel and verifying state recovery after reboot.
 - **DashboardSession**: An authenticated administrator session
   (token + validity window) granting access to the standalone
   dashboard API surface; secrets are never embedded in its content.
+- **DashboardCredential**: The standalone dashboard's login identity — a
+  username plus a secret kept only in the restricted store. It has a
+  *default* state (username `admin`, password `admin`) that is
+  initialized automatically on a fresh installation and remains until the
+  administrator changes it; the secret itself is never part of the
+  credential as observed by any client.
 
 ## Success Criteria *(mandatory)*
 
@@ -462,6 +545,13 @@ an active tunnel and verifying state recovery after reboot.
   on first use, without documentation.
 - **SC-008**: In 100% of live-log views and unauthenticated API checks,
   no credential value is ever visible.
+- **SC-009**: On 100% of fresh installations, the first login attempt with
+  the default credentials succeeds with **0** manual provisioning steps.
+- **SC-010**: After saving new credentials from the LuCI page, a dashboard
+  login with the new values succeeds and a login with the previous values
+  fails — both within **5 seconds** of the save.
+- **SC-011**: The stored password value appears **0** times in any page
+  source, response body, log line or monitor panel.
 
 ## Assumptions
 
@@ -484,6 +574,16 @@ an active tunnel and verifying state recovery after reboot.
   standard networking services (firewall, service manager, config
   store) are available; the feature does not need to support older
   platforms.
+- The default dashboard credential is `admin` / `admin`; it is initialized
+  automatically during installation/first start, and re-initialization
+  never resets a credential the administrator has changed.
+- Dashboard sessions established before a credential change stay valid until
+  they expire on their own inactivity window.
+- The credentials tab is authorized by the router panel's own session model
+  (an authenticated administrative session); no separate credential of its
+  own is introduced.
+- The LuCI page labels follow the router panel's translation mechanism; the
+  Persian wording quoted in FR-029/FR-030 is the intended phrasing.
 - Backend components must respect the project constitution: use only
   the platform's native infrastructures, avoid heavyweight runtimes on
   the router, execute all monitoring asynchronously with explicit
