@@ -1278,3 +1278,92 @@ are NOT re-appended.
 every profile can be configured from its own settings form through the
 already-implemented `profile.update` API, and the specification no longer
 contradicts itself about the authentication model.
+
+## Phase 27: Convergence — the OpenVPN hostname field and the stale auth model (2026-10-21)
+
+**Purpose**: the third convergence pass (after Phases 25 and 26) re-assessed
+the shipped code against the amended `spec.md`, `plan.md`, the data model and
+the constitution v1.2.0, this time probing the areas the earlier passes did
+not: the contract↔daemon method surface, the data model's entities, and the
+behaviour of the surface Phase 26 added. The code itself is sound — the
+findings are one misleading UI field and two stale model descriptions. The
+on-device items remain tracked as **T046** and **T057** (device-bound) and
+are NOT re-appended.
+
+- [ ] T094: Drop the ineffective hostname field from the OpenVPN branch of the profile settings form per FR-001, FR-006, US1/AC2 (contradicts) — target files: `saadway/files/htdocs/saadway/js/app.js`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+  - The form added in Phase 26 / T092 offers a **"Server hostname/IP"**
+    field for an OpenVPN profile and sends it as `patch.hostname`. The
+    daemon accepts the patch (`saadway/src/ubus.c`, `h_profile_update` →
+    `p->hostname`) — but **`tunnel-openvpn.c` never reads `p->hostname`**:
+    an OpenVPN profile's server comes from the imported file's `remote`
+    directive (`m.remote_host`, `tunnel-openvpn.c:162-169`, written into
+    the 0600 rendered config at import time). The field therefore promises
+    a change that never reaches the running configuration, and the value it
+    shows the operator is the one they typed — not the one in effect.
+  - Remove the hostname field from the **OpenVPN** branch of the form (the
+    imported `.ovpn` file is the server's single source of truth; changing
+    the server means re-importing the file). The IKEv2 branch keeps its
+    identity fields, where `hostname` IS the server (`remote_addrs` in the
+    rendered swanctl config, `tunnel-ikev2.c`).
+  - The empty-field-means-unchanged semantics stay ✓ and the form MUST NOT
+    offer any other field the daemon cannot honour.
+  - `contracts/api.md` — the `profile.update` row MUST state that
+    `hostname` applies to the **IKEv2** profile only (the OpenVPN server
+    comes from the `.ovpn` file), so the contract and the daemon agree on
+    what the patch does.
+  - Verification: the OpenVPN settings form has no hostname field; the
+    IKEv2 form still exposes it and the change is observable in
+    `/etc/config/saadway` and in the rendered 0600 config (on-device proof
+    folded into T046/T057); the SPA parses; the i18n locales stay 1:1
+    (the now-unused `edit_hostname` key MUST be removed from **both**
+    locales if the field disappears).
+
+- [ ] T095: Rewrite the stale authentication model in the data model per FR-020, FR-028 (contradicts) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
+  - The **DashboardSession** entity still describes the pre-bypass model:
+    the dedicated `admin` account provisioned with the *default* password,
+    the ubus session token, the 1800 s inactivity expiry, and — worst —
+    *"Invalid/absent token: all `saadway.*` RPC calls rejected"*, which is
+    the exact opposite of the shipped behaviour (the tokenless client is
+    authorized by the `unauthenticated` ACL group, `docs/verify-2512.md`
+    §7). The **DashboardCredential** entity's state diagram likewise still
+    shows the "default (admin / admin, hash in /etc/shadow)" state, which
+    the auth bypass retired.
+  - Rewrite both entities to the shipped model: the dashboard client uses
+    rpcd's **default (unauthenticated) session** (the all-zero session id)
+    and is authorized by the ACL group named `unauthenticated`, which
+    covers the `saadway` ubus object only; the dashboard creates **no**
+    session and has **no** credential; the `saadway_login` mapping plus the
+    `admin` account are the **optional operator credential**, created on
+    demand by the LuCI credentials tab, with the hash only in the 0600
+    `/etc/shadow`; the "absent token" case is now the **normal** path (the
+    calls succeed) and the residual risk is the network boundary (the
+    LAN-bound listener + the firewall's WAN input policy).
+  - The other entities (Profile, SteeringRule, ServiceState, BackupExport)
+    MUST stay semantically unchanged — only the two authentication-related
+    entities are in scope.
+  - Verification: no statement in the data model still claims a dashboard
+    login, a session token, an inactivity expiry, a default password or a
+    tokenless rejection (a grep over the file must show only the amended
+    wording).
+
+- [ ] T096: Correct the device-rule contract row per plan: the API contract (partial) — target file: `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+  - The method table documents `steer.device.set` / `steer.device.remove` in
+    **one** row with the params `{ match_type, match_value, policy? }` —
+    but the daemon's **remove** takes only `{ match_type, match_value }`
+    (`h_steer_device_remove` reads exactly those two attributes and ignores
+    a policy). A client following the contract literally would send a
+    `policy` that the method silently drops.
+  - Split the row into two (or state the remove params explicitly) so the
+    contract states the exact payload of each method, and check the other
+    combined rows (`steer.domain.add` / `steer.domain.remove`,
+    `maint.backup.export` / `maint.backup.import`) for the same ambiguity
+    — the daemon's payloads are the authority
+    (`saadway/src/ubus.c`, the registered methods).
+  - Verification: every row of the method table names the exact parameters
+    the daemon reads for that method (a read of `saadway/src/ubus.c` per
+    row), and no row implies a parameter the method ignores.
+
+**Checkpoint**: the dashboard's OpenVPN settings form no longer offers a
+field the daemon cannot honour, the data model describes the tokenless
+authentication model that actually ships, and the API contract states each
+method's exact payload.
