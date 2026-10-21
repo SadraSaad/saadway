@@ -1381,3 +1381,85 @@ are NOT re-appended.
 field the daemon cannot honour, the data model describes the tokenless
 authentication model that actually ships, and the API contract states each
 method's exact payload.
+
+## Phase 28: Convergence — the `.ovpn` device override and the data model's UCI types (2026-10-21)
+
+**Purpose**: the fourth convergence pass (after Phases 25–27) probed the
+remaining surfaces: the `.ovpn` import validation against the data model's
+rules, the data model's UCI section types against the shipped
+`/etc/config/saadway` and `contracts/uci.md`, and the backup schema against
+the codec. The daemon, the SPA and the contracts are sound; the findings are
+one import-validation rule that is not enforced, and two data-model
+statements that do not match the shipped UCI. The on-device items remain
+tracked as **T046** and **T057** (device-bound) and are NOT re-appended.
+
+- [ ] T097: Reject a `dev` directive in an imported `.ovpn` file per FR-001, FR-025, Constitution IV (contradicts) — target file: `saadway/src/tunnel-openvpn.c`:
+  - The data model's validation rules require the importer to refuse
+    dangerous directives, explicitly listing *"`dev` overrides conflicting
+    with saadwaydev naming"*. The shipped ban list
+    (`banned_dirs[]`, `saadway/src/tunnel-openvpn.c:22-29`) contains
+    `dev-node` but **not** `dev`, so a `dev tun5` line in an imported file
+    falls through to the "all other lines verbatim" branch and is copied
+    into the rendered 0600 config. It is only neutralised because the
+    renderer appends its own `dev-type tun` + `dev <ifname>` identity last
+    (`:273-274`) — i.e. the safety currently depends on the option's
+    last-one-wins behaviour rather than on the import refusing the
+    directive, and the operator gets no feedback that the file carried one.
+  - Add `dev` to the banned directives so the import **fails closed** with
+    `E_UNSUPPORTED_DIRECTIVE` (the same code the other dangerous
+    directives produce). The `dev-type` check (tun/tun6 only) and the
+    `dev-node` ban stay as they are.
+  - The rejection MUST happen during the import (no partial save, FR-025)
+    and MUST NOT touch the running profile.
+  - Verification: the unit/host suite stays green, the 14 modules keep
+    compiling clean under `-Wall -Wextra`, and a `.ovpn` carrying a `dev`
+    line is rejected with `E_UNSUPPORTED_DIRECTIVE` while one without it
+    imports unchanged (on-device proof folded into T046/T057).
+
+- [ ] T098: Correct the data model's UCI section types per FR-024, plan: the UCI contract (contradicts) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
+  - The data model declares the UCI section type **`saadway_service`** in
+    two places — the IP-range auto-bypass ("conceptual kind") and the
+    `ServiceState` entity — but **no such section type exists**. The
+    shipped and contracted type is **`service`**:
+    `contracts/uci.md` ("Section `service` (unique, `option ...` one named
+    section)"), `saadway/files/saadway.conf` (`config service 'service'`),
+    and the daemon's own reader (`uci-state.c:896`, `!strcmp(s->type,
+    "service")`). The dashboard preferences live in the **`dashboard`**
+    section (`config dashboard 'dashboard'`), not in a service section.
+  - Correct both declarations to the real types (`service` for the
+    service state and the auto-bypass option, `dashboard` for the
+    dashboard preferences) and make the `ServiceState` entity's field
+    table match the options the daemon actually reads and writes in the
+    `service` section (`enabled`, `active_profile`, `connection_status`,
+    `failover_attempts`, `failover_cooldown`, `probe_interval`,
+    `stats_interval`, `kill_switch`, `iprange_bypass`).
+  - No other entity changes: `Profile` (`saadway_profile` ✓),
+    `SteeringRule`'s rule sections (`saadway_domain_rule` ✓,
+    `saadway_device_rule` ✓) and `BackupExport` are already correct.
+  - Verification: every section type named in the data model exists in
+    `saadway/files/saadway.conf` and is handled by the daemon
+    (`uci-state.c`), and the data model agrees with `contracts/uci.md`.
+
+- [ ] T099: State the two different uniqueness behaviours in the data model per FR-025 (partial) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
+  - The `SteeringRule` entity's uniqueness rule says a duplicate
+    **`match_value`** is "detected at create; response = reject", but the
+    daemon's `sw_uci_device_set` has **set semantics**: an existing rule
+    with the same `match_type` + `match_value` is **updated** in place
+    (`saadway/src/uci-state.c`, the loop that assigns `d->ptype = pol`),
+    never rejected. Only the **domain** rule rejects a duplicate, and it
+    does so case-insensitively (`domain_taken` → `strcasecmp` ✓) with
+    `E_DUPLICATE` — the behaviour the quickstart's Scenario 3 step 4
+    exercises.
+  - Rewrite the uniqueness rule to state both behaviours exactly: a
+    duplicate **domain** (case-insensitive) is rejected with
+    `E_DUPLICATE` (no silent double rule), while a repeated device
+    **match_value** updates the existing rule's policy — the "set"
+    semantics the dashboard's device form relies on.
+  - Verification: the data model's wording matches the daemon's behaviour
+    for both rule kinds (a read of `sw_uci_domain_add` and
+    `sw_uci_device_set`).
+
+**Checkpoint**: the importer refuses a device override instead of relying on
+the option order, the data model names the UCI sections that actually
+exist and the uniqueness behaviour the daemon implements, and the shipped
+code, the contracts and the model agree with each other.
