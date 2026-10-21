@@ -29,8 +29,8 @@ endif
 # LDFLAGS/CPPFLAGS: no built-in values to fight — upstream passes LDFLAGS
 # on the command line; CPPFLAGS stays empty unless a caller provides it.
 
-MODULES:= backup counters dns failover health log main policy steering \
-	tunnel-ikev2 tunnel-openvpn ubus uci-state
+MODULES:= backup counters creds dns failover health log main policy \
+	steering tunnel-ikev2 tunnel-openvpn ubus uci-state
 OBJS:= $(MODULES:%=%.o)
 
 all: saadway

@@ -707,6 +707,56 @@ suite must be re-run against the **corrected** stub; the authoritative
   `package/utils/busybox/config/loginutils/Config.in` (`chpasswd` /
   `cryptpw` — the password is applied over stdin, never through argv).
 
+* **Dashboard credential flow (upstream facts for Phase 23 / T075–T078).**
+  `openwrt/rpcd` `sys.c:81-141` (the `rpcd-mod-rpcsys` plugin's
+  `rpc-sys password_set`): the upstream mechanism for setting a password
+  is to **fork `/bin/passwd <user>` and write the password to the child's
+  STDIN** — the plaintext never appears in argv and the platform performs
+  the crypt(3) hashing into the 0600 `/etc/shadow`. Our provisioning
+  helper follows the identical mechanism (`chpasswd` → `passwd` → `cryptpw`
+  + a staged 0600 `/etc/shadow` rewrite). `openwrt/rpcd` `session.c:832-858`
+  (the `$p$<name>` bridge: `getspnam(hash + 3)` + `rpc_login_test_password`)
+  and `openwrt/openwrt`
+  `package/utils/busybox/config/loginutils/Config.in` (`chpasswd`,
+  `cryptpw`, `passwd`) are the other two upstream facts. On the ACL side,
+  `openwrt/rpcd` `session.c:935-990` (`rpc_login_test_permission` →
+  `fnmatch` over the login section's `list read`/`list write`, with `*`
+  matching every group and `!group` denying) proves that a login section
+  listing only `saadway` never receives the `saadway-credentials` group,
+  while the stock root section (`*`) does.
+* **Phase 23 / T075–T078 applied.** The default dashboard credential is
+  now initialized **automatically and idempotently**: `50-saadway-rpcd`
+  calls the provisioning helper's new `init` mode, which creates the
+  nologin account `admin` and applies the default password **only when the
+  account does not exist yet** (a package upgrade re-runs the first-boot
+  script and MUST NOT overwrite a credential the administrator changed —
+  FR-028/SC-009). The login section was renamed to `saadway_login`
+  (`username 'admin'`, `password '$p$admin'`, `list read/write 'saadway'`),
+  is still created only when missing, always refreshed, committed
+  (`uci commit rpcd`), and the pre-T072 `saadway_admin` section is deleted.
+  The hash is produced by the **platform's** crypt(3) with the plaintext
+  piped to `chpasswd`/`passwd` over stdin — never an argument, never a
+  world-readable UCI option. T076 added the apply path: the new
+  `saadway/src/creds.c` module validates the input and relays the secret
+  **once** over a pipe to the helper's new `set-credentials` mode (create
+  the account → set the password → update `saadway_login` → commit → reload
+  rpcd — in that order, so a failure leaves the previous credential
+  usable); the ubus method `saadway.mgmt.credentials.set` defers its reply
+  and is completed by the child reaper with a bounded 15 s timeout. The
+  daemon never stores a credential and never computes a hash. The new
+  root-only ACL group `saadway-credentials` grants exactly that one
+  method; the dashboard's own `saadway` group does not hold it (FR-034).
+  T077 refactored the LuCI view into a `form.Map` with exactly two tabs
+  (upstream `tab()`/`taboption()`), the credentials tab carrying the three
+  masked fields and the standard *Save & Apply*, whose write path is the
+  single ubus call — the browser never writes UCI and never sees the
+  stored secret. T078 shipped `tests/credential-flow-audit.sh`, an offline
+  audit of the whole flow (the `$p$` reference, the stdin piping, the
+  initialize-only-when-absent rule, the fail-closed ordering, the ACL
+  scoping, and the absence of a credential store in the daemon): it reports
+  10 findings against the pre-change state and is clean against the
+  shipped tree.
+
 ## 9. Footprint pointers → T045
 
 * Zero references to iptables/ipset/fw3 in the whole tree (Gate 1/2) —
@@ -721,6 +771,17 @@ suite must be re-run against the **corrected** stub; the authoritative
   SPA docroot → `/www/saadway/`, uci-defaults `40-saadway-uhttpd` +
   `50-saadway-rpcd` → `/etc/uci-defaults/`. All referenced sources exist;
   the formerly empty `/etc/saadway/htdocs` install dir is removed.
+* credential-flow assets (Phase 23 / T075–T077): `saadway/src/creds.c`
+  (the daemon module that validates and relays the credential change),
+  `luci-app-saadway/root/usr/share/rpcd/acl.d/saadway-credentials.json`
+  (the root-only group granting exactly one method —
+  `saadway.mgmt.credentials.set`) and the tabbed LuCI view
+  `luci-app-saadway/htdocs/luci-static/resources/view/saadway/dashboard.js`
+  (two tabs). The dashboard's own `saadway` group
+  (`saadway/files/rpc-acl.json`) MUST NOT contain that method — the
+  standalone dashboard may never re-key its own login (FR-034). The
+  credential flow is audited offline by `tests/credential-flow-audit.sh`
+  (T078).
 * uci-defaults assets (Phase 20 / T066): `40-saadway-uhttpd` →
   `/etc/uci-defaults/` writes the uhttpd listener options. The listener
   value is assembled ONLY from a validated bare IPv4 literal (four decimal

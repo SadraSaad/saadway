@@ -8,9 +8,6 @@
 #   option (the hash stays in the 0600 /etc/shadow file, written by `passwd`).
 #   Upstream resolves the '$p$<name>' suffix with getspnam(<name>), so the
 #   suffix MUST name the shadow row of the login user (T072).
-# - The 'admin' system user is NOT created here; provisioning goes through
-#   /usr/libexec/saadway/provision (files/saadway-provision), which creates
-#   the account and applies the default password.
 # - The login section below maps the user to the least-privilege ACL access
 #   group 'saadway' (files/rpc-acl.json → /usr/share/rpcd/acl.d/saadway.json).
 # - Until provisioning has created the user, session.login('admin', …) fails
@@ -18,28 +15,48 @@
 #
 # IMPORTANT: the heredoc is quoted ('EOF') so '$p$' reaches uci verbatim.
 
-# Create the login section only when it is missing — the ACL lists belong to
-# the creation (add_list appends, so re-adding them on an existing section
-# would duplicate the entries).
-if ! uci -q get rpcd.saadway_admin >/dev/null 2>&1; then
+# 1) Initialize the DEFAULT credential (FR-028): the account is created and
+#    the default password applied on the first boot — but ONLY when the
+#    account does not exist yet, so a package upgrade (which re-installs
+#    this file and re-runs it) never overwrites a credential the
+#    administrator has changed. The helper drives the platform's own crypt(3)
+#    with the plaintext on stdin; the hash lands in the 0600 /etc/shadow.
+if [ -x /usr/libexec/saadway/provision ]; then
+	/usr/libexec/saadway/provision init >/dev/null 2>&1 || \
+		echo "50-saadway-rpcd: default credential initialization failed" >&2
+fi
+
+# 2) The login mapping: create the section only when it is missing — the ACL
+#    lists belong to the creation (add_list appends, so re-adding them on an
+#    existing section would duplicate the entries).
+if ! uci -q get rpcd.saadway_login >/dev/null 2>&1; then
 	uci -q batch <<'EOF'
 add rpcd login
-rename rpcd.@login[-1]='saadway_admin'
-add_list rpcd.saadway_admin.read='saadway'
-add_list rpcd.saadway_admin.write='saadway'
+rename rpcd.@login[-1]='saadway_login'
+add_list rpcd.saadway_login.read='saadway'
+add_list rpcd.saadway_login.write='saadway'
 EOF
 fi
 
-# ALWAYS refresh the credential mapping: an already-provisioned device still
-# carries the old 'saadway-admin' / '$p$saadway-admin' values and must be
-# migrated to the 'admin' login (T072).
+# 3) ALWAYS refresh the credential mapping: an already-provisioned device
+#    still carries the old 'saadway-admin' / '$p$saadway-admin' values and
+#    must be migrated to the 'admin' login (T072).
 uci -q batch <<'EOF'
-set rpcd.saadway_admin.username='admin'
-set rpcd.saadway_admin.password='$p$admin'
+set rpcd.saadway_login.username='admin'
+set rpcd.saadway_login.password='$p$admin'
 EOF
 
-# uci batch only writes the delta under /tmp/.uci (tmpfs) — without the
-# commit the login mapping (and the migration) is lost on the next reboot.
+# 4) Drop the pre-T072 login section — a stale mapping is a stale credential
+#    reference (T075).
+uci -q delete rpcd.saadway_admin >/dev/null 2>&1
+
+# 5) uci batch only writes the delta under /tmp/.uci (tmpfs) — without the
+#    commit the login mapping (and the migration) is lost on the next reboot.
 uci -q commit rpcd
+
+# 6) Make the mapping effective for an already-running rpcd (upgrade path).
+if [ -x /etc/init.d/rpcd ]; then
+	/etc/init.d/rpcd reload >/dev/null 2>&1 || true
+fi
 
 exit 0

@@ -116,7 +116,13 @@ listed in docs/verify-2512.md §7). Alternative mode: set
    new values are accepted and the old ones rejected within 5 s
    (FR-032/SC-010); a mismatching confirmation is rejected without any
    change (FR-031).
-6. Verify the uhttpd listener the first-boot script wrote:
+6. Verify the authorization split: a session established with the
+   DASHBOARD credential must be refused by `saadway.mgmt.credentials.set`
+   (ubus PERMISSION_DENIED — the method lives in the root-only
+   `saadway-credentials` ACL group, which the dashboard's own `saadway`
+   group does not hold), while the router's root session may call it
+   (FR-034).
+7. Verify the uhttpd listener the first-boot script wrote:
    `uci get uhttpd.main.listen_http` must print `<lan-ip>:80` — a bare
    `host:port`, never a CIDR (`192.168.5.1/24:80` makes uhttpd abort the
    bind with `getaddrinfo(): Name does not resolve` and leaves the SPA

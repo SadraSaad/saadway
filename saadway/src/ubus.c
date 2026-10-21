@@ -227,6 +227,47 @@ static int h_mgmt_set(struct ubus_context *ctx, struct ubus_object *obj,
 }
 
 /* ------------------------------------------------------------------ */
+/* mgmt.credentials.set (T076) — the dashboard's own login credential  */
+/* ------------------------------------------------------------------ */
+
+/* The reply is DEFERRED: the root-only helper runs as a supervised child,
+ * so the method returns immediately and the request is completed when the
+ * child exits (creds.c). The secret never appears in the reply (FR-033)
+ * and never reaches the daemon's store (FR-021). */
+static int h_mgmt_credentials_set(struct ubus_context *ctx,
+				  struct ubus_object *obj,
+				  struct ubus_request_data *req,
+				  const char *method, struct blob_attr *msg)
+{
+	struct sw_ctx *c = global_ctx;
+	struct blob_attr *u, *p;
+
+	(void)c;
+	(void)obj;
+	(void)method;
+	arg_missing(obj);
+
+	u = blobmsg_find_name_typed(msg, "username", BLOBMSG_TYPE_STRING);
+	p = blobmsg_find_name_typed(msg, "password", BLOBMSG_TYPE_STRING);
+	if (!u || !p)
+		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
+				   "E_BAD_SYNTAX");
+	if (!sw_creds_validate(blobmsg_get_string(u), blobmsg_get_string(p)))
+		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
+				   "E_BAD_SYNTAX");
+	if (sw_creds_busy())
+		return reply_error(ctx, req, UBUS_STATUS_UNKNOWN_ERROR,
+				   "credential change already running");
+
+	/* sw_creds_start() defers the request and spawns the helper; on a
+	 * spawn failure it has already completed the deferred request, so
+	 * this handler must NOT reply again. */
+	sw_creds_start(ctx, req, blobmsg_get_string(u),
+		       blobmsg_get_string(p));
+	return UBUS_STATUS_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* profile.* (T016)                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -1193,6 +1234,7 @@ static int h_maint_cooldown_set(struct ubus_context *ctx,
 static struct ubus_method saadway_methods[] = {
 	UBUS_METHOD_NOARG("mgmt.status",        h_mgmt_status),
 	UBUS_METHOD_NOARG("mgmt.set",                 h_mgmt_set),
+	UBUS_METHOD_NOARG("mgmt.credentials.set",     h_mgmt_credentials_set),
 	UBUS_METHOD_NOARG("profile.list",       h_profile_list),
 	UBUS_METHOD_NOARG("profile.import_openvpn",    h_profile_import_openvpn),
 	UBUS_METHOD_NOARG("profile.create_ikev2",      h_profile_create_ikev2),

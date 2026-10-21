@@ -24,7 +24,7 @@ SWSTUBS=${1:-${SWSTUBS:-/tmp/opencode/swstubs}}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-MODULES="main uci-state log ubus policy tunnel-openvpn tunnel-ikev2 failover steering dns health counters backup"
+MODULES="main uci-state log ubus policy tunnel-openvpn tunnel-ikev2 failover steering dns health counters backup creds"
 
 die() {
 	echo "link-audit: $1" >&2

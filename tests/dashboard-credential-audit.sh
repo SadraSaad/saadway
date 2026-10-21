@@ -123,10 +123,13 @@ fi
 # B — no plaintext credential material in the shipped UCI-writing files
 # ---------------------------------------------------------------------
 echo "check B — no plaintext credential material in the shipped tree"
+# the shell source escapes the literal '$p$' when the value is built from a
+# variable — normalize the escaped dollars before the check, so the rule
+# stays about the VALUE ('$p$<user>') and not about its spelling
 bad_pw=$(grep_tree_nocomment "$TREE/saadway/files" "option password\|password=" |
-	grep -vF "'\$p\$" | grep -v ':[[:space:]]*$')
+	sed 's/\\\$/$/g' | grep -vF "'\$p\$" | grep -v ':[[:space:]]*$')
 bad_pw="$bad_pw$(grep_tree_nocomment "$TREE/luci-app-saadway" "option password\|password=" |
-	grep -vF "'\$p\$" | grep -v ':[[:space:]]*$')"
+	sed 's/\\\$/$/g' | grep -vF "'\$p\$" | grep -v ':[[:space:]]*$')"
 if [ -z "$bad_pw" ]; then
 	report_pass "every password reference is a \$p\$ shadow reference"
 else

@@ -330,6 +330,12 @@ void sw_child_notify(struct uloop_process *up, int ret)
 		sw_dns_reload_conf(c);
 		return;
 	}
+	if (type == SW_CHILD_CREDS) {
+		/* the credential helper finished: complete the deferred
+		 * ubus request with its exit status (T076)               */
+		sw_creds_child_exited(pid, ret);
+		return;
+	}
 	if (type == SW_CHILD_TUNNEL) {
 		struct sw_profile *p = (struct sw_profile *)arg;
 

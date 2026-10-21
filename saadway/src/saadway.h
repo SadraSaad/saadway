@@ -24,6 +24,7 @@
 #include <string.h>
 #include <time.h>
 #include <syslog.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <libubox/uloop.h>
@@ -104,7 +105,8 @@ enum sw_conn {
 	SW_CONN_CONTAINED = 3, SW_CONN_COOLDOWN = 4
 };
 
-enum sw_child_type { SW_CHILD_TUNNEL, SW_CHILD_PING, SW_CHILD_DNSMASQ };
+enum sw_child_type { SW_CHILD_TUNNEL, SW_CHILD_PING, SW_CHILD_DNSMASQ,
+		       SW_CHILD_CREDS };
 
 /* ------------------------------------------------------------------ */
 /* Data model (data-model.md: Profile / SteeringRule / ServiceState)    */
@@ -478,6 +480,13 @@ void sw_dnsfile_check(void);
 /* shared: reload config + re-apply policy (SIGHUP / mgmt.set) */
 void sw_reload(void);
 /* main.c child registry (tunnel children, health pings, dnsmasq) */
+/* creds.c — the standalone dashboard's own login credential (T076) */
+bool sw_creds_busy(void);
+bool sw_creds_validate(const char *username, const char *password);
+int sw_creds_start(struct ubus_context *ctx, struct ubus_request_data *req,
+		   const char *username, const char *password);
+void sw_creds_child_exited(pid_t pid, int status);
+
 void sw_child_track(pid_t pid, int type, void *arg);
 bool sw_child_take(pid_t pid, int *type, void **arg);
 pid_t sw_child_find(int type, void *arg); /* first live child of type owning arg */

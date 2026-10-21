@@ -1,11 +1,13 @@
 #!/bin/sh
 # saadway-provision — dedicated dashboard user provisioning (T028/T032, FR-020)
 #
-# Installs to /usr/libexec/saadway/provision. Run over SSH:
+# Installs to /usr/libexec/saadway/provision:
 #
-#   /usr/libexec/saadway/provision set      # create the user + default password
-#   /usr/libexec/saadway/provision passwd    # change the password (interactive)
-#   /usr/libexec/saadway/provision unset    # remove the dashboard user
+#   /usr/libexec/saadway/provision init              # first boot: default cred
+#   /usr/libexec/saadway/provision set               # create user + default pwd
+#   /usr/libexec/saadway/provision passwd             # change the password
+#   /usr/libexec/saadway/provision set-credentials <user>   # password on stdin
+#   /usr/libexec/saadway/provision unset             # remove the dashboard user
 #
 # Design (verified against rpcd source, docs/verify-2512.md T-verify-5):
 # rpcd's session.login tests /etc/config/rpcd 'config login' sections with
@@ -24,6 +26,17 @@
 # page source. A well-known default is weak: the account is nologin, the ACL
 # grant is least-privilege and the uhttpd listener is LAN-bound; run
 # `provision passwd` to leave the default behind.
+#
+# T075: the `init` mode (used by the first-boot script) initializes the
+# default credential ONLY when the account does not exist yet — a package
+# upgrade re-runs that script and MUST NOT overwrite a credential the
+# administrator has changed (FR-028).
+#
+# T076: the `set-credentials` mode applies a NEW username + password (the
+# password arrives on stdin) and then updates the login mapping and reloads
+# rpcd, so the new credential is effective immediately (FR-032). The account
+# is created BEFORE the mapping is updated, so the mapping never points at a
+# missing account (fail closed).
 
 set -u
 
@@ -34,6 +47,7 @@ PASSWD=/etc/passwd
 SHADOW=/etc/shadow
 UID_DASH=${SAADWAY_DASH_UID:-355}
 GID_DASH=${SAADWAY_DASH_GID:-355}
+LOGIN_SECTION='saadway_login'
 
 fail() {
 	echo "provision: $1" >&2
@@ -41,81 +55,93 @@ fail() {
 }
 
 user_exists() {
-	grep -qs "^${USER}:" "$PASSWD"
+	grep -qs "^${1}:" "$PASSWD"
 }
 
 shadow_exists() {
-	grep -qs "^${USER}:" "$SHADOW"
+	grep -qs "^${1}:" "$SHADOW"
+}
+
+# the lowest free uid at or above UID_DASH (a rename must not collide with
+# the account it replaces)
+next_free_uid() {
+	uid=$UID_DASH
+	while grep -qs ":${uid}:" "$PASSWD"; do
+		uid=$((uid + 1))
+		[ "$uid" -lt 65535 ] || return 1
+	done
+	printf '%s' "$uid"
 }
 
 # ---------------------------------------------------------------------
 # password handling — the plaintext never becomes a command argument
 # ---------------------------------------------------------------------
 
-# Rewrite the user's /etc/shadow row with the given crypt hash (staged,
+# Rewrite a user's /etc/shadow row with the given crypt hash (staged,
 # atomic, 0600). Used by the cryptpw fallback.
 set_shadow_hash() {
-	grep -v "^${USER}:" "$SHADOW" > "$SHADOW.saadway.tmp" 2>/dev/null || return 1
-	printf '%s:%s:0:0:99999:7:::\n' "$USER" "$1" >> "$SHADOW.saadway.tmp" || return 1
+	grep -v "^${1}:" "$SHADOW" > "$SHADOW.saadway.tmp" 2>/dev/null || return 1
+	printf '%s:%s:0:0:99999:7:::\n' "$1" "$2" >> "$SHADOW.saadway.tmp" || return 1
 	chmod 0600 "$SHADOW.saadway.tmp"
 	mv "$SHADOW.saadway.tmp" "$SHADOW"
 }
 
-# set_password <plaintext> — apply the password without ever exposing it in
-# argv. Preferred: chpasswd (reads "user:password" from stdin). Fallbacks:
-# passwd fed from stdin, then cryptpw + a staged /etc/shadow rewrite.
-# Fails closed when no setter is available.
+# set_password <user> <plaintext> — apply the password without ever exposing
+# it in argv. Preferred: chpasswd (reads "user:password" from stdin).
+# Fallbacks: passwd fed from stdin, then cryptpw + a staged /etc/shadow
+# rewrite. Fails closed when no setter is available.
 set_password() {
 	if command -v chpasswd >/dev/null 2>&1; then
-		printf '%s:%s\n' "$USER" "$1" | chpasswd >/dev/null 2>&1 && return 0
+		# printf is a shell builtin here (no exec -> no argv exposure)
+		printf '%s:%s\n' "$1" "$2" | chpasswd >/dev/null 2>&1 && return 0
 		return 1
 	fi
 	if command -v passwd >/dev/null 2>&1; then
-		printf '%s\n' "$1" | passwd "$USER" >/dev/null 2>&1 && return 0
+		printf '%s\n' "$2" | passwd "$1" >/dev/null 2>&1 && return 0
 		return 1
 	fi
 	if command -v cryptpw >/dev/null 2>&1; then
-		hash=$(printf '%s' "$1" | cryptpw -m sha512 2>/dev/null)
-		[ -n "$hash" ] || hash=$(printf '%s' "$1" | cryptpw 2>/dev/null)
+		hash=$(printf '%s' "$2" | cryptpw -m sha512 2>/dev/null)
+		[ -n "$hash" ] || hash=$(printf '%s' "$2" | cryptpw 2>/dev/null)
 		[ -n "$hash" ] || return 1
-		set_shadow_hash "$hash" || return 1
+		set_shadow_hash "$1" "$hash" || return 1
 		return 0
 	fi
 	return 1
 }
 
-# /etc/passwd line: shell /bin/false, crypt placeholder x in shadow form:
-# user:x:uid:gid:comment:home:shell  (home /var is world-writable tmp)
+# create the account (nologin shell, no home write access)
 do_add() {
-	user_exists && shadow_exists && { echo "provision: '$USER' already provisioned"; return 0; }
+	[ -n "$1" ] || fail "no user name given"
+	user_exists "$1" && shadow_exists "$1" && return 0
 
 	command -v addgroup >/dev/null 2>&1 || \
 		fail "busybox addgroup not present; provisioning unavailable"
 	addgroup -g "$GID_DASH" saadway 2>/dev/null || true
 
-	if ! user_exists; then
-		adduser -D -u "$UID_DASH" -G saadway -h /var -s /bin/false \
-			-g "SaadWay dashboard" "$USER" 2>/dev/null \
-		|| do_add_by_file
+	if ! user_exists "$1"; then
+		uid=$(next_free_uid) || fail "no free uid available"
+		adduser -D -u "$uid" -G saadway -h /var -s /bin/false \
+			-g "SaadWay dashboard" "$1" 2>/dev/null \
+		|| do_add_by_file "$1" "$uid"
 	fi
-	shadow_exists && { echo "provision: '$USER' already provisioned"; return 0; }
+	shadow_exists "$1" && return 0
 
 	# busybox adduser sometimes writes a shadow-less passwd:x form only;
 	# guarantee the /etc/shadow row so rpcd's getspnam finds a hash slot.
-	if ! shadow_exists; then
-		cp "$SHADOW" "$SHADOW.saadway.tmp" 2>/dev/null || fail "cannot stage $SHADOW"
-		printf '%s:x:0:0:99999:7:::\n' "$USER" >> "$SHADOW.saadway.tmp" || fail "shadow append failed"
-		chmod 0600 "$SHADOW.saadway.tmp"
-		# busybox shadow has no selinux attrs to preserve; plain mv
-		mv "$SHADOW.saadway.tmp" "$SHADOW" || fail "shadow replace failed"
-	fi
+	cp "$SHADOW" "$SHADOW.saadway.tmp" 2>/dev/null || fail "cannot stage $SHADOW"
+	printf '%s:x:0:0:99999:7:::\n' "$1" >> "$SHADOW.saadway.tmp" || fail "shadow append failed"
+	chmod 0600 "$SHADOW.saadway.tmp"
+	# busybox shadow has no selinux attrs to preserve; plain mv
+	mv "$SHADOW.saadway.tmp" "$SHADOW" || fail "shadow replace failed"
+	return 0
 }
 
 # fallback when busybox adduser is not compiled in: append the passwd rows
 # directly (uid/gid from the constants above)
 do_add_by_file() {
-	grep -qs "^${USER}:" "$PASSWD" && return 0
-	echo "${USER}:x:${UID_DASH}:${GID_DASH}:SaadWay dashboard:/var:/bin/false" \
+	grep -qs "^${1}:" "$PASSWD" && return 0
+	echo "${1}:x:${2}:${GID_DASH}:SaadWay dashboard:/var:/bin/false" \
 		>> "$PASSWD" || fail "passwd append failed"
 	return 0
 }
@@ -144,8 +170,18 @@ do_remove_legacy() {
 	echo "provision: legacy '$LEGACY_USER' account removed"
 }
 
+# maintain the login mapping: the account's shadow row is referenced, never
+# copied (upstream resolves '$p$<name>' with getspnam(<name>))
+update_login_mapping() {
+	uci -q batch <<EOF
+set rpcd.${LOGIN_SECTION}.username='$1'
+set rpcd.${LOGIN_SECTION}.password='\$p\$$1'
+EOF
+	uci -q commit rpcd
+}
+
 do_del() {
-	user_exists || {
+	user_exists "$USER" || {
 		do_remove_legacy
 		restart_rpcd
 		return 0
@@ -166,17 +202,38 @@ restart_rpcd() {
 	fi
 }
 
+reload_rpcd() {
+	[ -x /etc/init.d/rpcd ] && /etc/init.d/rpcd reload >/dev/null 2>&1 && \
+		echo "provision: rpcd reloaded"
+	return 0
+}
+
 # ---------------------------------------------------------------------------
 
 umask 077
 
 case "${1:-set}" in
+	init)
+		# FR-028: the default credential is initialized automatically, but
+		# ONLY when the account does not exist yet - re-running the
+		# first-boot script (upgrade path) must never overwrite a
+		# credential the administrator has changed.
+		if user_exists "$USER"; then
+			echo "provision: '$USER' already provisioned - default credential left untouched"
+		else
+			do_add "$USER"
+			set_password "$USER" "$DEFAULT_PASSWORD" || \
+				fail "could not apply the default password (no usable chpasswd/passwd/cryptpw)"
+			echo "provision: default credential initialized for '$USER'"
+		fi
+		do_remove_legacy
+		;;
 	set)
-		do_add
+		do_add "$USER"
 		# The default password is applied non-interactively: the plaintext
 		# goes to the setter over stdin and only the crypt(3) hash reaches
 		# /etc/shadow (0600). Never in argv, never in UCI, never in a log.
-		set_password "$DEFAULT_PASSWORD" || \
+		set_password "$USER" "$DEFAULT_PASSWORD" || \
 			fail "could not apply the password (no usable chpasswd/passwd/cryptpw); the account was left without a hash"
 		do_remove_legacy
 		restart_rpcd
@@ -185,19 +242,46 @@ case "${1:-set}" in
 		echo "provision:          /usr/libexec/saadway/provision passwd"
 		;;
 	passwd)
-		user_exists || fail "'$USER' is not provisioned (run '$0 set' first)"
+		user_exists "$USER" || fail "'$USER' is not provisioned (run '$0 set' first)"
 		# busybox passwd handles the interactive hash materialization
 		# (writes crypt(3) into /etc/shadow; hashes never touch stdout).
 		passwd "$USER" || fail "password assignment failed"
 		restart_rpcd
 		echo "provision: password for '$USER' changed"
 		;;
+	set-credentials)
+		# usage: provision set-credentials <username>   (password on stdin)
+		newuser="${2:-}"
+		[ -n "$newuser" ] || fail "usage: $0 set-credentials <username> (password on stdin)"
+		case "$newuser" in
+		*[!A-Za-z0-9._-]*) fail "illegal characters in the user name" ;;
+		esac
+		newpass=$(cat)
+		[ -n "$newpass" ] || fail "no password received on stdin"
+		# 1) the account FIRST - the mapping must never reference a
+		#    missing account (that would fail the login closed).
+		do_add "$newuser"
+		# 2) the password, over stdin (never argv).
+		set_password "$newuser" "$newpass" || \
+			fail "could not apply the password (no usable chpasswd/passwd/cryptpw); the previous credential is untouched"
+		# 3) the login mapping (username + '$p$<user>'), committed.
+		update_login_mapping "$newuser"
+		# 4) the old account (if the name changed) must not survive with
+		#    the old password.
+		if [ "$newuser" != "$USER" ]; then
+			remove_user_rows "$USER"
+			USER="$newuser"
+		fi
+		# 5) make it effective immediately.
+		reload_rpcd
+		echo "provision: dashboard credential updated for '$newuser'"
+		;;
 	unset)
 		do_del
 		restart_rpcd
 		;;
 	*)
-		echo "usage: $0 {set|passwd|unset}" >&2
+		echo "usage: $0 {init|set|passwd|set-credentials <user>|unset}" >&2
 		exit 2
 		;;
 esac
