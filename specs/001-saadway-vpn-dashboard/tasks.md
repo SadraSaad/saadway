@@ -1168,3 +1168,99 @@ are gone and the daemon compiles clean under `-Wall -Wextra`, the IKEv2
 form offers the FR-004/FR-005 surface the API already supports, the
 access-control artifacts describe the post-bypass reality, and the plan's
 structure tree matches the tree that ships.
+
+## Phase 26: Convergence — the DNS-status panel and the profile settings form (2026-10-21)
+
+**Purpose**: the second convergence pass (after Phase 25) re-assessed the
+shipped code against the amended `spec.md` (35 FRs, 13 SCs, 6 user stories),
+`plan.md` and the constitution v1.2.0. It confirmed the Phase 25 fixes and
+found **two** functional gaps and **one** documentation contradiction. The
+on-device items remain tracked as **T046** and **T057** (device-bound) and
+are NOT re-appended.
+
+- [ ] T091: Render the real DNS-leak status in the dashboard's security panel per FR-013, US2 (contradicts) — target files: `saadway/files/htdocs/saadway/js/app.js`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+  - `js/app.js:376` — `tab_security()` calls **only** `saadway.mgmt.status`
+    → `sec.status` and hands its payload to `dns_status_rows()`, which reads
+    `dns_forced`, **`resolver_if`** and **`leak_risk`**. `sec.status`
+    returns `{ kill_switch, dns_forced, contained }`; `resolver_if` and
+    `leak_risk` are returned by the **separate** method `sec.dns.status`
+    (`{ resolver_if, leak_risk }` — `contracts/api.md`). The two fields are
+    therefore always `undefined` and the panel renders "—" for the resolver
+    and "unknown" for the leak risk: the zero-leak indication US2/FR-013
+    asks for can never be shown.
+  - Fetch the DNS status from its own method — e.g. call
+    `SwApi.saadway("sec.dns.status")` in the same panel and pass **that**
+    payload to `dns_status_rows()` (keeping `dns_forced` from `sec.status`),
+    or merge the two payloads before rendering. The panel MUST then show the
+    real resolver interface and the real leak-risk verdict.
+  - The panel MUST keep working when `sec.dns.status` is unavailable
+    (e.g. the DNS subsystem is not up): render the "unknown" fallback
+    instead of throwing.
+  - `contracts/api.md` — the method table MUST state where each DNS field
+    comes from (`sec.status` vs `sec.dns.status`) so the two cannot be
+    confused again.
+  - Verification: the panel's DNS section renders the resolver interface and
+    the leak-risk verdict returned by the daemon (on-device proof folded
+    into T046/T057); the SPA parses (`node --check`); the i18n locales stay
+    1:1.
+
+- [ ] T092: Add the OpenVPN profile's own settings form to the dashboard per US1/AC2, FR-002, FR-023 (missing) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`:
+  - US1/AC2: *"Given an OpenVPN profile requiring credentials, **When** the
+    administrator opens **its settings form**, Then a section titled 'Section
+    to add an optional "auth-user-pass" file with your credentials' is
+    present where they can optionally enter a username and password attached
+    to the profile."* The dashboard has no per-profile form: the credential
+    fields exist only in the **import** card (Phase 25 / T085), so an
+    existing profile's settings — and its credentials — cannot be edited.
+    The API is complete for this: `profile.update { name, patch }` patches
+    `enabled`, `hostname`, `username`, `password`, `remote_id`, `local_id`,
+    `cert_mode` and the proposals (`saadway/src/ubus.c:465`), and the
+    contract documents it ("patch fields only; secrets replaced not
+    echoed") — the SPA calls it **0** times.
+  - Add a per-profile settings form to the profiles panel: an action that
+    opens the form for the chosen profile (the profile list row gains an
+    "edit" action next to activate/delete), carrying the FR-002 section
+    ("Section to add an optional 'auth-user-pass' file with your
+    credentials") with the optional username/password, plus the profile's
+    editable fields (`enabled`, and the OpenVPN hostname/username) and — for
+    an IKEv2 profile — the FR-004 connection settings.
+  - The form MUST submit ONE `profile.update` call with the changed fields
+    only (an unchanged secret MUST NOT be sent again), MUST NOT echo the
+    stored secret back into the form (FR-033), and MUST report the daemon's
+    rejection codes (`E_BAD_SYNTAX`, `E_DUPLICATE_NAME`, …) inline.
+  - The new labels MUST be added to **both** locales (the parity stays 1:1)
+    and the form MUST reuse the existing FR-002 title key where it applies
+    (the import card and the settings form share the wording).
+  - Verification: the SPA parses; the locales are 1:1; editing a profile's
+    credentials/enabled state is observable in `/etc/config/saadway` and in
+    the rendered profile (on-device proof folded into T046/T057);
+    `tests/luci-spa-audit.sh` stays green.
+
+- [ ] T093: Supersede the obsolete authentication answers in the specification's clarification sessions per FR-020, FR-028 (partial) — target file: `specs/001-saadway-vpn-dashboard/spec.md`:
+  - The clarification session of 2026-10-21 still answers: *"How is the
+    default credential made available on a fresh installation …? → A: The
+    default credential is initialized automatically during installation/first
+    start …"* and *"Do dashboard sessions established before a credential
+    change keep working? → A: Yes — they remain valid until they expire …"*.
+    Both were superseded by the auth bypass of the same date: the
+    installation now ships **no** default password (FR-028 amended) and the
+    dashboard has **no** sessions at all (FR-020 amended — the tokenless
+    client). The FRs were amended in Phase 24; the clarification record was
+    not, so the specification now contradicts itself.
+  - Append a **superseding clarification session** (or mark the two obsolete
+    answers as superseded with a pointer to the new rule) that states: the
+    dashboard needs no credential, no default password is shipped, the
+    optional `saadway_login` credential is created on demand by the LuCI
+    credentials tab, and the dashboard's ubus surface is authorized as
+    rpcd's default (unauthenticated) session.
+  - The FR/SC text, the user stories and the acceptance scenarios MUST NOT
+    change in this task — only the clarification record is reconciled.
+  - Verification: no statement in `spec.md` still claims a default
+    credential, a dashboard login or a dashboard session (a grep over the
+    document for "default credential", "session" and "login" must show only
+    the amended wording and the historical Q/A marked as superseded).
+
+**Checkpoint**: the dashboard shows the daemon's real DNS/leak-risk state,
+every profile can be configured from its own settings form through the
+already-implemented `profile.update` API, and the specification no longer
+contradicts itself about the authentication model.
