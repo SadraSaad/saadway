@@ -139,10 +139,12 @@
 				"<label>" + esc(T("ike_cert")) + "</label>" +
 				'<input type="text" readonly value="' + esc(T("ike_cert_value")) + '">';
 		} else {
-			html += "<label>" + esc(T("edit_hostname")) + "</label>" +
-				'<input id="pf-host" autocomplete="off" spellcheck="false" dir="ltr">' +
-				/* FR-002: the optional auth-user-pass credentials - the
-				 * stored secret is never shown, only replaced. */
+			/* T094: no hostname field for an OpenVPN profile — its
+			 * server comes from the imported file's "remote"
+			 * directive (tunnel-openvpn.c never reads
+			 * p->hostname), so a field here could not be honoured. */
+			/* FR-002: the optional auth-user-pass credentials - the
+			 * stored secret is never shown, only replaced. */
 				'<fieldset class="sub"><legend>' +
 				esc(T("import_creds_title")) + "</legend>" +
 				"<label>" + esc(T("import_user")) + "</label>" +
@@ -322,9 +324,6 @@
 			var chk = $("#pf-enabled");
 			if (chk && chk.checked !== !!ep.enabled)
 				patch.enabled = chk.checked;
-			var phost = $("#pf-host");
-			if (phost && phost.value.trim())
-				patch.hostname = phost.value.trim();
 			if (ep.kind === "ikev2") {
 				var iku = $("#pf-ike-user"), ikp = $("#pf-ike-pass");
 				if (iku && iku.value.trim())

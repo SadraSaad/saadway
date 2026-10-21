@@ -1290,7 +1290,7 @@ findings are one misleading UI field and two stale model descriptions. The
 on-device items remain tracked as **T046** and **T057** (device-bound) and
 are NOT re-appended.
 
-- [ ] T094: Drop the ineffective hostname field from the OpenVPN branch of the profile settings form per FR-001, FR-006, US1/AC2 (contradicts) — target files: `saadway/files/htdocs/saadway/js/app.js`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+- [X] T094: Drop the ineffective hostname field from the OpenVPN branch of the profile settings form per FR-001, FR-006, US1/AC2 (contradicts) — target files: `saadway/files/htdocs/saadway/js/app.js`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
   - The form added in Phase 26 / T092 offers a **"Server hostname/IP"**
     field for an OpenVPN profile and sends it as `patch.hostname`. The
     daemon accepts the patch (`saadway/src/ubus.c`, `h_profile_update` →
@@ -1318,7 +1318,7 @@ are NOT re-appended.
     (the now-unused `edit_hostname` key MUST be removed from **both**
     locales if the field disappears).
 
-- [ ] T095: Rewrite the stale authentication model in the data model per FR-020, FR-028 (contradicts) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
+- [X] T095: Rewrite the stale authentication model in the data model per FR-020, FR-028 (contradicts) — target file: `specs/001-saadway-vpn-dashboard/data-model.md`:
   - The **DashboardSession** entity still describes the pre-bypass model:
     the dedicated `admin` account provisioned with the *default* password,
     the ubus session token, the 1800 s inactivity expiry, and — worst —
@@ -1346,7 +1346,7 @@ are NOT re-appended.
     tokenless rejection (a grep over the file must show only the amended
     wording).
 
-- [ ] T096: Correct the device-rule contract row per plan: the API contract (partial) — target file: `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+- [X] T096: Correct the device-rule contract row per plan: the API contract (partial) — target file: `specs/001-saadway-vpn-dashboard/contracts/api.md`:
   - The method table documents `steer.device.set` / `steer.device.remove` in
     **one** row with the params `{ match_type, match_value, policy? }` —
     but the daemon's **remove** takes only `{ match_type, match_value }`
@@ -1362,6 +1362,20 @@ are NOT re-appended.
   - Verification: every row of the method table names the exact parameters
     the daemon reads for that method (a read of `saadway/src/ubus.c` per
     row), and no row implies a parameter the method ignores.
+
+**As implemented (T094–T096)** — two decisions worth recording:
+1. **T094 dropped the field rather than teaching the renderer to honour
+   it**: the OpenVPN profile's server is the imported file's `remote`
+   directive, and the rendered 0600 config is written at import time — a
+   `p->hostname` patch could never reach the running configuration, so
+   offering the field was the actual defect. The now-unused `edit_hostname`
+   locale key was removed from **both** locales.
+2. **T096 verified the other combined rows** instead of assuming they were
+   wrong: `steer.domain.add` / `steer.domain.remove` both take exactly
+   `{ domain }` (the daemon reads one attribute in each handler) ⇒ that row
+   was already correct and stays. Only the device row was split. The
+   contract's `policy?` for `steer.device.set` is right — the daemon
+   defaults a missing policy to `tunneled`.
 
 **Checkpoint**: the dashboard's OpenVPN settings form no longer offers a
 field the daemon cannot honour, the data model describes the tokenless

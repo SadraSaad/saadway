@@ -1205,6 +1205,41 @@ this phase; each traces to the appended tasks.md lines.
   and the spec's obsolete-claim grep shows only the amended wording and the
   marked history.
 
+### Phase 27 record — the OpenVPN hostname field and the stale auth model (T094–T096)
+
+* **T094 — the form no longer promises what the daemon cannot do.** The
+  OpenVPN branch of the profile settings form (Phase 26 / T092) offered a
+  "Server hostname/IP" field and the daemon accepted the patch into
+  `p->hostname` — but `saadway/src/tunnel-openvpn.c` never reads
+  `p->hostname`: an OpenVPN profile's server comes from the imported
+  file's `remote` directive (`m.remote_host`, `tunnel-openvpn.c:162-169`),
+  written into the 0600 rendered config at import time. The field is
+  removed from the OpenVPN branch (the `.ovpn` file is the server's single
+  source of truth); the IKEv2 branch keeps its identity fields, where
+  `hostname` **is** the server (`remote_addrs` in the swanctl config).
+  `contracts/api.md` now states the patchable fields and that `hostname`
+  applies to IKEv2 only, and that the OpenVPN credential pair travels
+  together.
+* **T095 — the data model describes the model that ships.** The
+  `DashboardSession` entity claimed a dedicated account with a *default*
+  password, a session token, a 1800 s inactivity expiry and — worst —
+  *"Invalid/absent token: all `saadway.*` RPC calls rejected"*, the exact
+  opposite of the tokenless behaviour; the `DashboardCredential` state
+  diagram still showed the retired "default (admin / admin)" state. Both
+  are rewritten: no session, no credential, the all-zero default session
+  id, the `unauthenticated` group as the authorization path, the optional
+  credential created on demand, and the network boundary as the access
+  control (the §7 residual risk).
+* **T096 — the contract states each method's exact payload.** The
+  `steer.device.set` / `steer.device.remove` row implied a `policy?` for
+  the remove, which the daemon does not read; the row is split. The other
+  combined row (`steer.domain.add` / `steer.domain.remove` — both take
+  exactly `{ domain }`) was verified against the daemon and left as it is.
+* **Host evidence**: all seven host audits green, the unit suite 21/21, the
+  14-module `-Wall -Wextra` sweep clean, shellcheck clean, all shipped
+  JavaScript parses, all shipped JSON valid, the i18n locales **128 = 128**,
+  and the data model's stale-claim grep is clean.
+
 ---
 
 **Traceability:** Gates 1–7 are executed by `quickstart.md` scenarios 1–7

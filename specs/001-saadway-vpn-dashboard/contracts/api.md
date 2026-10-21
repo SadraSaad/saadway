@@ -69,7 +69,7 @@ All mutating calls are gated by ACL; all responses redact secrets (FR-021).
 | `profile.list` | `{}` → `{ profiles: [ {name, kind, enabled, order, secret_ref, active, status} ] }` | secrets never returned |
 | `profile.import_openvpn` | `{ name, ovpn_b64, credentials?: {username, password} }` → `{ profile, warnings? }` or error 400-class code with import detail | validates (FR-025); reject codes: `E_NO_REMOTE`, `E_BAD_SYNTAX`, `E_UNSUPPORTED_DIRECTIVE`, `E_DUPLICATE_NAME` |
 | `profile.create_ikev2` | `{ name, hostname, username, password, remote_id?, local_id?, cert_mode?, proposal_*? }` → `{ profile }` | defaults per FR-004/FR-005 |
-| `profile.update` | `{ name, patch }` → `{ profile }` | patch fields only; secrets replaced not echoed |
+| `profile.update` | `{ name, patch }` → `{ profile }` | patch fields only; secrets replaced not echoed. The patchable fields are `enabled`, `hostname` (**IKEv2 only** — an OpenVPN profile's server comes from the imported file's `remote` directive, so `hostname` is not honoured there), `username`, `password`, `remote_id`, `local_id`, `cert_mode`, `proposal_ike`, `proposal_esp`. The OpenVPN credential pair (`username` + `password`) travels **together** — a lone password is rejected with `E_BAD_SYNTAX` (T094) |
 | `profile.delete` | `{ name }` → `{}` | refuses when active unless `force=true` |
 | `profile.activate` | `{ name }` → `{ switched_to, elapsed_ms }` | single-click switch (FR-007); atomic (FR-014) |
 | `profile.deactivate` | `{}` → `{}` | tunnel down; kill-switch holds if enabled |
@@ -80,7 +80,8 @@ All mutating calls are gated by ACL; all responses redact secrets (FR-021).
 |---|---|---|
 | `steer.list` | `{}` → `{ domains: [...], devices: [...], iprange_bypass: bool }` | |
 | `steer.domain.add` / `steer.domain.remove` | `{ domain }` → `{}` | duplicate → error `E_DUPLICATE` (FR-025) |
-| `steer.device.set` / `steer.device.remove` | `{ match_type, match_value, policy? }` → `{}` | policy `direct\|tunneled` |
+| `steer.device.set` | `{ match_type, match_value, policy? }` → `{}` | policy `direct\|tunneled` (omitted ⇒ `tunneled`); `match_type` is `ip` or `mac` |
+| `steer.device.remove` | `{ match_type, match_value }` → `{}` | removes the rule — **no `policy`** (the daemon reads exactly these two attributes, T096) |
 | `steer.iprange.set` | `{ enabled }` → `{}` | bundled CIDR set toggle (FR-010) |
 
 All steer mutations re-apply policy atomically; tunnel stays up

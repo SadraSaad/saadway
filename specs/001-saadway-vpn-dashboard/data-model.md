@@ -169,9 +169,11 @@ leaves the previous credential intact and usable):
 
 ```text
              fresh install
-   (absent) ───────────────► default (admin / admin, hash in /etc/shadow)
+   (absent) ───────────────► (no account, no mapping — the dashboard
+        │                    needs no credential; nothing is provisioned)
         │                            │
         │                            │  LuCI tab: Save & Apply
+        │                            │  (the account is created on demand)
         │                            ▼
         │                      customized (new username + password)
         │                            │
@@ -187,35 +189,49 @@ leaves the previous credential intact and usable):
 - The `$p$` suffix always equals the account name — a mapping pointing at a
   non-existent account fails closed (rpcd: `getspnam` → no row → the
   login is denied).
-- Re-running the first-boot initialization on an existing account is a
-  **no-op** for the credential: the default is applied only when the
-  account does not exist yet.
+- **No default credential is shipped** (T079/T094): the installation
+  provisions no account and no password — the optional credential is
+  created only when the administrator saves it in the LuCI credentials tab.
+  Re-running the first-boot script on an existing account is a **no-op**:
+  the mapping is refreshed only when the account exists, so an
+  administrator-set credential is never clobbered.
 
 ## Entity: DashboardSession
 
-Handling via uhttpd-mod-ubus ubus sessions (research D7; rpcd shadow bridge
-mechanics source-verified in docs/verify-2512.md §2):
+**Retired by the auth bypass (2026-10-21 — FR-020/FR-035, constitution
+v1.2.0, research.md D11).** The dashboard creates **no** session; the
+entity is kept here to document the transport's session model, not a
+dashboard credential.
 
-- Auth material: the dedicated dashboard user `admin` (nologin) is
-  provisioned over SSH by `/usr/libexec/saadway/provision`, which applies
-  the DEFAULT password `admin` non-interactively (plaintext over stdin,
-  hash only in `/etc/shadow`); its password hash lives ONLY in
-  `/etc/shadow` (0600), referenced from `/etc/config/rpcd` as
-  `option password '$p$admin'` — credential material never sits in a
-  world-readable UCI option (Constitution IV); the daemon keeps no
-  credential store of its own; the default is replaced with
-  `saadway-provision passwd`. Alternative mode:
-  system-root auth — login as root (rpcd default login section); UCI
-  `config dashboard/authentication = dedicated|system` records which
-  credential set the administrator chose.
-- Token: ubus session token ( ACL-gated by `rpc-acl.json` (dedicated
-  `saadway` group) and `luci-app-saadway.json` (LuCI view surface);
-  inactivity expiry from UCI `dashboard.session_timeout` (default
-  1800 s; rpcd upstream default 300 s); concurrent sessions independent;
-  secrets never embedded in payloads (FR-021).
-- Invalid/absent token: all `saadway.*` RPC calls rejected; LuCI root
-  sessions ride rpcd's wildcard-group default (`list read/write '*'`) for
-  lifecycle calls only (FR-022).
+- Session: **none**. The SPA sends rpcd's **default (unauthenticated)
+  session** — the all-zero session id `00000000000000000000000000000000`
+  (`openwrt/rpcd` `include/rpcd/session.h:35`,
+  `RPC_DEFAULT_SESSION_ID`) — on every call. rpcd creates that session at
+  startup with a NULL login section (`session.c:1396-1400`) and grants it
+  **only** the access group named `unauthenticated`
+  (`session.c:944-946`), which `saadway/files/rpc-acl.json` defines for the
+  `saadway` ubus object. uhttpd-mod-ubus forwards every `/ubus` call to
+  rpcd's `session.access` with the request's `params[0]` as the session id
+  (`openwrt/uhttpd` `ubus.c:280-297`, `820-840`).
+- Expiry: **none** — the default session never expires and carries no TTL
+  (the `dashboard.session_timeout` option and the `session_timeout` field
+  of `mgmt.status` are vestigial; the dashboard no longer logs in).
+- Auth material: **none for the dashboard**. The optional
+  `saadway_login` mapping plus the nologin `admin` account remain for
+  operators and scripts (the secret is the `'$p$<user>'` **reference**;
+  the hash lives only in the 0600 `/etc/shadow`; no credential material
+  ever sits in a world-readable UCI option, Constitution IV) and are
+  created on demand by the LuCI credentials tab. The daemon keeps no
+  credential store of its own.
+- Token handling: no token is created, stored, sent in a URL or logged;
+  secrets are never embedded in payloads (FR-021).
+- Absent token: the **normal** path — the `saadway` calls succeed through
+  the `unauthenticated` group, while every other ubus object is refused.
+  The dashboard's access control is the platform's network boundary (the
+  LAN-bound uhttpd listener + the firewall's WAN input policy); the
+  residual risk is recorded in `docs/verify-2512.md` §7. The LuCI root
+  session rides rpcd's wildcard-group default (`list read/write '*'`) for
+  the lifecycle calls only (FR-022).
 
 ---
 

@@ -70,7 +70,6 @@
 	"ike_id_required": "The custom ID must not be empty",
 	"edit_profile": "Settings",
 	"profile_settings": "Profile settings",
-	"edit_hostname": "Server hostname/IP (empty keeps the current value)",
 	"edit_ike_remote": "Remote ID (empty keeps the current value)",
 	"edit_ike_local": "Local ID (empty keeps the current value)",
 	"edit_keep_hint": "Leave a field empty to keep its current value. The stored password is never shown — type a new one to replace it.",
