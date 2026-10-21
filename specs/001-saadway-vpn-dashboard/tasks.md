@@ -1566,3 +1566,119 @@ and the shipped code describe the same access model — a LAN-scoped,
 tokenless dashboard whose access control is the platform's network
 boundary, with the credential action's reach recorded as a deviation rather
 than claimed as an isolation.
+
+## Phase 30: Remediation Round 14 — IKEv2 creation feedback & the nftables transaction failure
+
+**Purpose** (device report, 2026-10-21): two defects observed on a live
+device — the dashboard's IKEv2 form does nothing when "Create" is pressed,
+and the daemon's nftables policy never loads, so the service sits in the
+fail-closed emergency containment.
+
+**Root causes — verified in the tree (not guesses):**
+
+- **Frontend** — `saadway/files/htdocs/saadway/js/app.js`: `panel_events()`
+  (line 697) opens `if (btn) { … }` and that block ends with an
+  **unconditional `return;`** (line 783), so the fall-through
+  `panel_click(ev);` (line 784) is **unreachable** for every click that
+  carries a `data-act` attribute. The whole profiles panel is therefore
+  dead — *import*, **ike-create**, *activate*, *deactivate*, *edit* and
+  *delete* never run — which is exactly "clicking Create produces no
+  reaction and no console errors".
+- **Backend** — `saadway/src/policy.c`: `render_dev_sets()` emits the
+  per-device sets with a broken element list:
+  * the terminator is `"; } }"` → `elements = { 10.0.0.1; }` — a `;`
+    where nftables expects a `,`;
+  * the empty case yields `elements = { ; }` — an empty element list;
+  * the leading separator uses the **shared** loop counter `n`, so a MAC
+    rule that is not the first rule yields `elements = { , aa:bb:…; }`.
+
+  The correct shape already exists in the tree:
+  `sw_steering_mark_ranges()` (`saadway/src/steering.c`) uses a **per-list**
+  counter and the `elements = { %s }` form. nft rejects the table → the
+  delete+create transaction fails (`rc=1`) → the create-only retry fails
+  with the same content → `policy: DIRECT nft FAILED rc=1 — fail closed`
+  → `SENTINEL: EMERGENCY CONTAINMENT (tunnel-class egress blackholed)`
+  (`policy.c:580`): the tunnel-class egress stays blackholed.
+- **Diagnosability** — `run_argv()` (`policy.c:31`) redirects the child's
+  **stdout and stderr to `/dev/null`**, so nft's own error text is
+  discarded: the log shows only `rc=1`, never the reason.
+
+- [ ] T103: Fix IKEv2 creation submission feedback and resolve nftables transaction failure per FR-003, FR-014, FR-025, US1/AC3, Constitution IV (fail closed) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/js/api.js`, `saadway/files/core.nft`, `saadway/src/policy.c`, `saadway/src/unit/test_policy_render.c`:
+  - **Part A — the frontend (`js/app.js`, `js/api.js`).**
+    - `panel_events()` MUST stop swallowing the profiles-panel actions: the
+      unconditional `return;` at the end of its `if (btn)` block MUST be
+      removed so the fall-through `panel_click(ev);` runs for every action
+      that block does not handle — the profiles panel's *import*,
+      *ike-create*, *activate*, *deactivate*, *edit* and *delete* MUST
+      work again.
+    - `panel_click()` MUST scope itself to the profiles panel: it already
+      computes the panel id (`pid`) but never uses it — with the fall-through
+      in place, the steering / security / monitoring / maintenance buttons
+      would also reach it. It MUST ignore any button that is not inside the
+      profiles panel, and it MUST keep matching only `button[data-act]`
+      elements.
+    - The IKEv2 "Create" action MUST always give visible feedback: every
+      validation failure (an empty name or hostname, a custom Remote/Local ID
+      selected without a value) MUST toast an actionable message, and the
+      ubus failure MUST show the daemon's reason instead of the generic
+      "save_error".
+    - `js/api.js` MUST surface the failure reason: the ubus status codes
+      MUST map to readable messages (e.g. `2` = invalid argument,
+      `6` = permission denied, `4` = not found) and the daemon's `detail`
+      field (the `E_*` codes the daemon returns) MUST be included when the
+      transport delivers it — the current `err_of()` helper only looks at
+      `r.data.detail`, which the legacy `result` envelope does not carry
+      for an error; the envelope position MUST be verified against the
+      shipped transport (uhttpd-mod-ubus: the legacy `result` array for
+      errors and empty results, the modern `{error:{code,message}}`
+      envelope for pre-call rejections).
+    - The "Create" button MUST NOT submit a form: give it `type="button"`
+      so a click can never trigger a page navigation instead of the RPC.
+  - **Part B — the backend (`src/policy.c`, `files/core.nft`).**
+    - `render_dev_sets()` MUST emit each per-device set **only when it has
+      elements** (an empty set is declared without an `elements` clause),
+      MUST use a **per-list** separator counter (not the shared loop
+      counter `n`), and MUST use nftables' element syntax — a
+      comma-separated list inside `elements = { a, b }` — following the
+      `sw_steering_mark_ranges()` pattern already in the tree. The rendered
+      table MUST contain neither an empty `elements` list nor a stray
+      leading/trailing separator.
+    - The per-device rules MUST keep their semantics: `dev_ip` carries the
+      IP rules (with `flags interval`), `dev_mac` the MAC rules, and the
+      rule set of the dashboard's device form MUST keep the set-semantics
+      contract (a repeated `match_value` updates its rule).
+    - `files/core.nft` — the design-reference skeleton MUST document the two
+      per-device sets (it currently documents only `bypass_domains` and
+      `bypass_ranges`) and MUST match the renderer's shape, as the file's own
+      header requires ("Keep it in sync with policy.c").
+    - The failure MUST become diagnosable: the nft invocation MUST capture
+      the child's **stderr** (bounded, the existing `run_capture()` pattern
+      in the same file) and log it with the failing transaction, so a
+      rejected ruleset reports nft's own message instead of a bare `rc=1`.
+      The fail-closed behaviour itself MUST NOT change: a failed apply still
+      blackholes the tunnel-class egress (Constitution IV) — only the
+      diagnosis improves.
+  - **Part C — the regression test (TDD).** `saadway/src/unit/test_policy_render.c`
+    MUST gain the device-set assertions it never had: render with an
+    IP-only device rule, a MAC-only device rule, both kinds (with the MAC
+    rule **not** first) and with no device rule at all, and assert that the
+    output contains a well-formed `set dev_ip` / `set dev_mac` (comma
+    separated, no empty element list, no leading separator) and that a kind
+    with no rules is **not** emitted. The new assertions MUST fail against
+    the current renderer and pass after the fix.
+  - **Part D — the verification.**
+    - Host-side: the unit suite green (including the new render
+      assertions), the 14 modules compiling clean under `-Wall -Wextra`, all
+      host audits green, the shipped JavaScript parsing, and a static check
+      that the renderer can no longer emit `elements = { ; }`.
+    - On-device (folded into T046/T057): `nft -f` accepts the rendered
+      table (no `rc=1`), the `SENTINEL: EMERGENCY CONTAINMENT` line does
+      **not** appear in the log, the dashboard's IKEv2 "Create" produces a
+      visible result (a profile in the list, or a readable error), and the
+      profiles panel's import / activate / deactivate / delete actions work
+      again.
+
+**Checkpoint**: the profiles panel's actions reach the daemon again, the
+IKEv2 creation always reports its outcome, and the rendered nftables table
+is accepted by nft so the service leaves the emergency containment and
+operates under the intended policy.
