@@ -1703,3 +1703,101 @@ fail-closed emergency containment.
 IKEv2 creation always reports its outcome, and the rendered nftables table
 is accepted by nft so the service leaves the emergency containment and
 operates under the intended policy.
+
+## Phase 31: Remediation Round 15 — profile-name validation & the feedback the user sees
+
+**Purpose** (device report, 2026-10-22): creating a profile in the
+standalone dashboard with a name the daemon rejects (`E_BAD_SYNTAX: invalid
+name`) leaves the administrator with the raw error string — no hint, no
+friendly Persian message, and the input offers no indication of what is
+allowed.
+
+**Root cause — verified in the tree (the report's assumption was partly
+wrong; the fix must follow the code, not the assumption):**
+
+- The backend rule is `sw_valid_name()` — `saadway/src/uci-state.c:39`,
+  called from `saadway/src/ubus.c:404` (the profile create/update paths),
+  `saadway/src/tunnel-openvpn.c:209` (the import) and
+  `saadway/src/backup.c:489` (the restore). It is **not** a
+  `^[a-zA-Z0-9_-]{1,32}$` POSIX pattern: the shipped rule is
+  * non-empty, at most **64 bytes**;
+  * no leading `.`;
+  * no leading or trailing space, and **no byte below 0x21 anywhere**
+    (so no space and no control character);
+  * no `"`, no `'` and no 0x7f.
+- **Persian / UTF-8 names are ACCEPTED** (verified on the host against the
+  shipped function: `پروفایل` → accepted, `پروفایل-۱` → accepted). The
+  dashboard is Persian-first (FR-027), so the fix MUST NOT forbid
+  non-ASCII names — only the rules the daemon actually enforces.
+- The profile's UCI section name is a **hash**, not the profile name
+  (`u_gen_section()` → `p%06x`, `saadway/src/uci-state.c`), so the UCI
+  identifier syntax is **not** the constraint either.
+- The real gap is therefore entirely on the **frontend**: the name inputs
+  (`#imp-name`, `saadway/files/htdocs/saadway/js/app.js:199`, and
+  `#ike-name`, `:217`) carry no `pattern`, no `maxlength` and no hint, and
+  no client-side validation; the rejection therefore travels
+  `sw_valid_name` → `E_BAD_SYNTAX: invalid name` → `err_of()` →
+  `r.data.detail` and is shown **raw**.
+- The data model understates the rule: `Profile.name` says *"unique, 1–64
+  chars, non-empty"* (`specs/001-saadway-vpn-dashboard/data-model.md:21`)
+  and does not mention the space/quote/leading-dot restrictions.
+
+- [ ] T104: Add frontend slug validation and user feedback for profile names per FR-001, FR-003, FR-027, US1/AC1, US1/AC3 (partial) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/index.html`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`, `saadway/src/ubus.c`, `saadway/src/unit/test_name_rules.c` (new), `saadway/src/unit/Makefile`, `specs/001-saadway-vpn-dashboard/data-model.md`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+  - **The shared rule.** The dashboard MUST validate a profile name with
+    **exactly** the rule the daemon enforces (`sw_valid_name`): non-empty,
+    at most 64 bytes, no leading `.`, no leading/trailing space, no byte
+    below 0x21 (no space, no control character), no `"`, no `'` and no
+    0x7f — **non-ASCII (Persian) names stay valid** (FR-027: the
+    dashboard is Persian-first; the rule is a POSIX-safety rule, not a
+    Latin-only rule). Implement it once in `js/app.js` as a helper
+    (e.g. `valid_profile_name(name)`) and use it for **every** name input:
+    the OpenVPN import card (`#imp-name`), the IKEv2 card (`#ike-name`)
+    and the per-profile settings form (`#pf-*` — the profile name there is
+    read-only, but the helper MUST be the single source of truth).
+  - **The feedback.** A rejected name MUST produce a **friendly Persian
+    message** (a new i18n key, e.g. `name_invalid`, in **both** locales —
+    the parity MUST stay 1:1), naming the rule in one line ("۱ تا ۶۴
+    نویسه، بدون فاصله و بدون کوتیشن") instead of the raw
+    `E_BAD_SYNTAX: invalid name`. The toast path already exists
+    (`toast()` / `err_of()` in `js/app.js`) — the validation MUST run
+    **before** the RPC, so a doomed request is never sent.
+  - **The input affordances.** The name inputs MUST get
+    `maxlength="64"`, `dir="auto"` (so a Persian name renders in its own
+    direction), `spellcheck="false"` and an HTML `pattern` that mirrors the
+    rule, plus a one-line hint under the field (a new i18n key, e.g.
+    `name_hint`, in both locales) stating the rule. The pattern attribute
+    is a *hint*, not the authority: the JS helper remains the authority
+    (the pattern cannot express "no leading dot" or the byte rules).
+  - **The backend's detail.** `saadway/src/ubus.c` MUST make the
+    rejection self-describing: the `E_BAD_SYNTAX: invalid name` detail
+    MUST name the rule (e.g. *"invalid name: 1-64 characters, no spaces or
+    quotes, must not start with '.'"*) so a script or a future client can
+    act on it without guessing. The reject **code** stays `E_BAD_SYNTAX`
+    (the documented set in `contracts/api.md` MUST NOT grow for this).
+  - **The documentation.** `contracts/api.md` MUST document the profile
+    name rule next to the `profile.import_openvpn` / `profile.create_ikev2`
+    / `profile.update` rows (including the "no spaces, Persian allowed"
+    wording), and `data-model.md`'s `Profile.name` constraint MUST quote
+    the full rule the code enforces (not only "1–64 chars, non-empty").
+  - **The regression test (TDD).** A new `saadway/src/unit/test_name_rules.c`
+    (registered in the unit `Makefile`'s `TESTS` list) MUST pin the
+    accept/reject table of `sw_valid_name()`: accepted — `prov-a`,
+    `UPPER_ok`, `123`, `پروفایل`, `پروفایل-۱`; rejected — the empty
+    string, a 65-byte name, a leading `.`, a leading/trailing space, a
+    name with an inner space, a name with `"`, a name with `'` and a name
+    with 0x7f. The Persian cases are part of the contract (FR-027) and
+    MUST NOT be "fixed" into rejections.
+  - **Verification.** Host-side: the new unit test passes; the unit suite
+    stays green; the 14 modules keep compiling clean under `-Wall -Wextra`;
+    all host audits stay green; the shipped JavaScript parses; the i18n
+    locales stay 1:1. On-device (folded into T046/T057): a name with a
+    space, a leading dot or a 65-character name is refused **in the
+    browser** with the Persian hint and **no** ubus call is made; a
+    Persian name is accepted and the profile is created; the daemon's
+    rejection detail still names the rule for a direct
+    `ubus call saadway profile.create_ikev2` with a bad name.
+
+**Checkpoint**: the administrator is told the name rule before the request
+is sent, in the dashboard's own language; the browser and the daemon agree
+on the rule (one implementation, one documented contract), and Persian
+profile names keep working.
