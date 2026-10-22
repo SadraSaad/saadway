@@ -30,7 +30,8 @@ LOCAL_SRC += $(if $(USE_REAL_MBEDTLS),,$(SWSTUBS)/shim_impl/mbedtls_impl.c)
 
 SRC    := $(patsubst %,../%.c,uci-state log steering policy failover \
                               backup tunnel-openvpn tunnel-ikev2 dns)
-TESTS  := test_policy_render test_steer_order test_failover test_backup_codec
+TESTS  := test_policy_render test_steer_order test_failover test_backup_codec \
+          test_name_rules
 
 TEST_DEPS := test-stubs.c shim_uci.c $(SRC:.c=.o) $(LOCAL_SRC)
 

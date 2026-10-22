@@ -403,7 +403,7 @@ static int h_profile_create_ikev2(struct ubus_context *ctx,
 
 	if (!sw_valid_name(name))
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
-				   "E_BAD_SYNTAX: invalid name");
+				   "E_BAD_SYNTAX: invalid name (" SW_NAME_RULE ")");
 	if (sw_uci_name_taken(c, name))
 		return reply_error(ctx, req, UBUS_STATUS_INVALID_ARGUMENT,
 				   "E_DUPLICATE_NAME");

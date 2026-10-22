@@ -1742,7 +1742,7 @@ wrong; the fix must follow the code, not the assumption):**
   chars, non-empty"* (`specs/001-saadway-vpn-dashboard/data-model.md:21`)
   and does not mention the space/quote/leading-dot restrictions.
 
-- [ ] T104: Add frontend slug validation and user feedback for profile names per FR-001, FR-003, FR-027, US1/AC1, US1/AC3 (partial) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/index.html`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`, `saadway/src/ubus.c`, `saadway/src/unit/test_name_rules.c` (new), `saadway/src/unit/Makefile`, `specs/001-saadway-vpn-dashboard/data-model.md`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
+- [X] T104: Add frontend slug validation and user feedback for profile names per FR-001, FR-003, FR-027, US1/AC1, US1/AC3 (partial) — target files: `saadway/files/htdocs/saadway/js/app.js`, `saadway/files/htdocs/saadway/index.html`, `saadway/files/htdocs/saadway/i18n/en.json`, `saadway/files/htdocs/saadway/i18n/fa.json`, `saadway/src/ubus.c`, `saadway/src/unit/test_name_rules.c` (new), `saadway/src/unit/Makefile`, `specs/001-saadway-vpn-dashboard/data-model.md`, `specs/001-saadway-vpn-dashboard/contracts/api.md`:
   - **The shared rule.** The dashboard MUST validate a profile name with
     **exactly** the rule the daemon enforces (`sw_valid_name`): non-empty,
     at most 64 bytes, no leading `.`, no leading/trailing space, no byte
@@ -1796,6 +1796,21 @@ wrong; the fix must follow the code, not the assumption):**
     Persian name is accepted and the profile is created; the daemon's
     rejection detail still names the rule for a direct
     `ubus call saadway profile.create_ikev2` with a bad name.
+
+**As implemented (T104)** — two decisions worth recording:
+1. **The rule was taken from the code, not from the report.** The shipped
+   validator is `sw_valid_name()` (`saadway/src/uci-state.c:39`), not a
+   `^[a-zA-Z0-9_-]{1,32}$` pattern: the browser now implements that rule
+   **exactly** (≤ 64 bytes, no leading `.`, no byte below 0x21, no quote,
+   no 0x7f) and **Persian names stay valid** — the dashboard is
+   Persian-first (FR-027), so "fixing" them into rejections would have
+   broken the product. The JS and C verdicts were cross-checked over an
+   18-case table (including the Persian cases): 0 mismatches.
+2. **The rule lives in one place per side.** The daemon's rejection detail
+   quotes `SW_NAME_RULE` (`saadway/src/saadway.h`), the browser has one
+   `valid_profile_name()` helper used by every name input, and the contract
+   + data model quote the same rule. The name is no longer trimmed in the
+   browser, so the two sides judge the same string.
 
 **Checkpoint**: the administrator is told the name rule before the request
 is sent, in the dashboard's own language; the browser and the daemon agree

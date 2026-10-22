@@ -207,7 +207,8 @@ int sw_ovpn_import(struct sw_ctx *c, const char *name, const char *ovpn_b64,
 	bool has_remote = false;
 
 	if (!c || !name || !sw_valid_name(name)) {
-		snprintf(detail, detail_len, "E_BAD_SYNTAX: invalid profile name");
+		snprintf(detail, detail_len,
+			 "E_BAD_SYNTAX: invalid profile name (" SW_NAME_RULE ")");
 		return UBUS_STATUS_INVALID_ARGUMENT;
 	}
 	if (sw_uci_name_taken(c, name)) {

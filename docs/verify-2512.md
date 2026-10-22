@@ -1323,6 +1323,46 @@ this phase; each traces to the appended tasks.md lines.
   14-module `-Wall -Wextra` sweep clean, shellcheck clean, all shipped
   JavaScript parses, all shipped JSON valid, the i18n locales **128 = 128**.
 
+### Phase 31 record — the profile-name rule and its feedback (T104)
+
+* **The reported root cause was partly wrong, so the fix follows the code.**
+  The backend rule is `sw_valid_name()` — `saadway/src/uci-state.c:39`,
+  called from `saadway/src/ubus.c:404` (the profile create/update paths),
+  `saadway/src/tunnel-openvpn.c:209` (the import) and
+  `saadway/src/backup.c:489` (the restore) — and it is **not** a
+  `^[a-zA-Z0-9_-]{1,32}$` POSIX pattern: the shipped rule is *non-empty*,
+  *at most 64 bytes*, *no leading `.`*, *no byte below 0x21* (so no space
+  and no control character), *no `"`, no `'` and no 0x7f*. **Persian/UTF-8
+  names are accepted** (verified against the shipped function: `پروفایل` and
+  `پروفایل-۱` pass) — the dashboard is Persian-first (FR-027), and the
+  profile's UCI section name is a hash (`u_gen_section()` → `p%06x`), so
+  neither the UCI identifier syntax nor a Latin-only rule is involved.
+* **The browser now mirrors the daemon exactly.** One helper
+  (`valid_profile_name()` in `js/app.js`, with a UTF-8 byte counter) is
+  used by every name input; a rejected name is reported with a friendly
+  **Persian** message (`name_invalid`) and a one-line hint (`name_hint`) in
+  both locales — and the request is **not** sent. The inputs also carry
+  `maxlength="64"`, `dir="auto"` and an HTML `pattern` (a hint; the JS
+  helper remains the authority). The name is no longer trimmed, so the two
+  sides judge the same string.
+* **The backend explains itself.** The rejection detail now names the rule
+  (`E_BAD_SYNTAX: invalid name (1-64 characters, no spaces or quotes, must
+  not start with '.')`) via the shared `SW_NAME_RULE` macro in
+  `saadway/src/saadway.h`; the reject **code** stays `E_BAD_SYNTAX` (the
+  documented set does not grow). The contract (`contracts/api.md`) and the
+  data model (`Profile.name`) quote the same rule.
+* **TDD.** A new `saadway/src/unit/test_name_rules.c` (registered in the
+  unit `Makefile`) pins the accept/reject table of `sw_valid_name()` —
+  including the **Persian cases as part of the contract**, so nobody
+  "fixes" them into rejections later.
+* **Host evidence:** the unit suite green (the new name-rule cases and
+  the Phase 30 device-set cases), the 14-module `-Wall -Wextra` sweep
+  clean **against the real upstream OpenWrt headers** (libubox / libubus /
+  uci restored in the dev stub pool), all seven host audits green,
+  shellcheck clean, all shipped JavaScript parses, all shipped JSON valid,
+  the i18n locales **130 = 130**, and the JS-vs-C rule verdicts identical
+  over an 18-case table.
+
 ---
 
 **Traceability:** Gates 1–7 are executed by `quickstart.md` scenarios 1–7

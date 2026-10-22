@@ -24,6 +24,40 @@
 	 * the stored secret is NEVER sent back to the browser, FR-033). */
 	var editing_profile = null;
 	var profile_cache = [];
+
+	/* T104: the profile-name rule — the EXACT rule the daemon enforces
+	 * (sw_valid_name(), saadway/src/uci-state.c:39): non-empty, at most
+	 * 64 BYTES, no leading ".", no byte below 0x21 (so no space and no
+	 * control character), no quote and no 0x7f. Persian/UTF-8 names are
+	 * VALID — the dashboard is Persian-first (FR-027) and the rule is a
+	 * POSIX-safety rule, not a Latin-only one. */
+	function utf8_len(s) {
+		var n = 0;
+		for (var i = 0; i < s.length; i++) {
+			var c = s.charCodeAt(i);
+			if (c < 0x80) n += 1;
+			else if (c < 0x800) n += 2;
+			else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; }
+			else n += 3;
+		}
+		return n;
+	}
+
+	function valid_profile_name(name) {
+		if (typeof name !== "string" || name.length === 0)
+			return false;
+		if (utf8_len(name) > 64)
+			return false;
+		if (name.charAt(0) === ".")
+			return false;
+		for (var i = 0; i < name.length; i++) {
+			var c = name.charCodeAt(i);
+			if (c < 0x80 &&
+			    (c < 0x21 || c === 0x22 || c === 0x27 || c === 0x7f))
+				return false;
+		}
+		return true;
+	}
 	var logFollow = true;
 	var lastLogCursor = 0;
 	var rxHist = [], txHist = [];
@@ -196,7 +230,10 @@
 				esc(T("deactivate")) + "</button></div></div>" +
 				'<div class="card"><h3>' + esc(T("import_title")) + "</h3>" +
 				'<label>' + esc(T("import_name")) + "</label>" +
-				'<input id="imp-name" autocomplete="off" spellcheck="false">' +
+				'<input id="imp-name" maxlength="64" dir="auto" ' +
+				'pattern="[^\s&quot;&#39;.][^\s&quot;&#39;]*" ' +
+				'autocomplete="off" spellcheck="false">' +
+				'<p class="muted">' + esc(T("name_hint")) + "</p>" +
 				"<label>" + esc(T("import_file")) + "</label>" +
 				'<input id="imp-file" type="file" accept=".ovpn,text/plain">' +
 				/* FR-002: the optional auth-user-pass credentials live in
@@ -214,7 +251,10 @@
 				"</button></div>" +
 				'<div class="card"><h3>' + esc(T("ike_title")) + "</h3>" +
 				"<label>" + esc(T("ike_name")) + "</label>" +
-				'<input id="ike-name" autocomplete="off" spellcheck="false">' +
+				'<input id="ike-name" maxlength="64" dir="auto" ' +
+				'pattern="[^\s&quot;&#39;.][^\s&quot;&#39;]*" ' +
+				'autocomplete="off" spellcheck="false">' +
+				'<p class="muted">' + esc(T("name_hint")) + "</p>" +
 				"<label>" + esc(T("ike_hostname")) + "</label>" +
 				'<input id="ike-host" autocomplete="off" spellcheck="false" dir="ltr">' +
 				"<label>" + esc(T("ike_username")) + "</label>" +
@@ -380,8 +420,14 @@
 		}
 		if (act === "import") {
 			var f = $("#imp-file").files[0];
-			var nm = $("#imp-name").value.trim();
-			if (!f || !nm) { toast(T("save_error"), true); return; }
+			var nm = $("#imp-name").value;
+			/* T104: the name is checked HERE — the daemon would
+			 * reject it with a raw "E_BAD_SYNTAX: invalid name" */
+			if (!valid_profile_name(nm)) {
+				toast(T("name_invalid"), true);
+				return;
+			}
+			if (!f) { toast(T("save_error"), true); return; }
 			file_to_b64(f).then(function (b64) {
 				var msg = { name: nm, ovpn_b64: b64 };
 				var u = $("#imp-user").value, pw = $("#imp-pass").value;
@@ -398,7 +444,7 @@
 		}
 		if (act === "ike-create") {
 			var im = {
-				name: $("#ike-name").value.trim(),
+				name: $("#ike-name").value,
 				hostname: $("#ike-host").value.trim(),
 				username: $("#ike-user").value,
 				password: $("#ike-pass").value,
@@ -407,7 +453,12 @@
 				 * fixed to "off" and carries no parameter. */
 				cert_mode: "from-server",
 			};
-			if (!im.name || !im.hostname) { toast(T("save_error"), true); return; }
+			/* T104: the name is checked HERE (the daemon's own rule) */
+			if (!valid_profile_name(im.name)) {
+				toast(T("name_invalid"), true);
+				return;
+			}
+			if (!im.hostname) { toast(T("save_error"), true); return; }
 			var rmode = $("#ike-remote-mode"), lmode = $("#ike-local-mode");
 			if (rmode && rmode.value === "custom") {
 				var rid = $("#ike-remote").value.trim();

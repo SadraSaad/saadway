@@ -18,7 +18,7 @@ the list order = failover order.
 
 | Field | Type | Constraints / Validation |
 |---|---|---|
-| `name` | string | unique, 1–64 chars, non-empty; uniqueness enforced on create/update |
+| `name` | string | unique, non-empty, **1–64 bytes**; no leading `.`; no byte below 0x21 (so no space and no control character); no `"`, no `'` and no 0x7f. **Persian/UTF-8 names are valid** (the rule is a POSIX-safety rule, not a Latin-only one — FR-027). Uniqueness enforced on create/update (T104) |
 | `kind` | enum | `openvpn` \| `ikev2` |
 | `enabled` | boolean | default `true` |
 | `order` | integer | position in failover list; unique per profile; auto-renumbered on delete |

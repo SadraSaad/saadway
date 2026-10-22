@@ -52,6 +52,23 @@ created on demand by the LuCI credentials tab).
 
 ## ubus object `saadway` — methods
 
+**The profile-name rule (T104)** — every `name` parameter of the profile
+methods (`profile.import_openvpn`, `profile.create_ikev2`, `profile.update`)
+is validated by `sw_valid_name()` (`saadway/src/uci-state.c`):
+
+* non-empty, at most **64 bytes**;
+* no leading `.`;
+* no byte below 0x21 — so **no space** and no control character;
+* no `"`, no `'` and no 0x7f.
+
+**Persian / UTF-8 names are valid** — the rule is a POSIX-safety rule, not
+a Latin-only one (the dashboard is Persian-first, FR-027). A rejected name
+is answered with the 400-class code `E_BAD_SYNTAX` and the detail
+`invalid name (1-64 characters, no spaces or quotes, must not start with
+'.')`; the dashboard validates the same rule in the browser and shows the
+rule in Persian before sending a request.
+
+
 All mutating calls are gated by ACL; all responses redact secrets (FR-021).
 
 ### Lifecycle (`mgmt.*`)

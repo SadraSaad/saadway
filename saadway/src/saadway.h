@@ -328,6 +328,13 @@ void sw_sb_free(struct sw_strbuf *s);
 char *sw_sb_release(struct sw_strbuf *s, size_t *len);
 
 bool sw_valid_name(const char *name);        /* 1..64 unique-safe chars  */
+
+/* T104: the profile-name rule in one place - the daemon's rejection
+ * detail, the documentation and the dashboard's client-side check all
+ * quote it. The rule is a POSIX-safety rule, NOT a Latin-only one:
+ * Persian/UTF-8 names are valid (the dashboard is Persian-first,
+ * FR-027). */
+#define SW_NAME_RULE "1-64 characters, no spaces or quotes, must not start with '.'"
 bool sw_valid_hostname(const char *s);
 bool sw_valid_domain(const char *s);
 bool sw_valid_mac(const char *s);

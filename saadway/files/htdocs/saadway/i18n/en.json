@@ -38,6 +38,8 @@
 
 	"import_title": "Import OpenVPN profile",
 	"import_name": "Profile name",
+	"name_invalid": "Invalid profile name — 1 to 64 characters, no spaces or quotes, and it must not start with a dot",
+	"name_hint": "1–64 characters, no spaces or quotes; Persian names are allowed",
 	"import_file": ".ovpn file",
 	"import_user": "Username (optional)",
 	"import_pass": "Password (optional)",
